@@ -2,6 +2,15 @@
 
 This document defines the MVP for an Amazon-style store built on the MERN stack. It covers the tech stack, file structure, data model, API, the main technical decisions, and local setup.
 
+The other planning docs:
+
+| Doc | Covers |
+|---|---|
+| [02-project-structure.md](02-project-structure.md) | Frontend and backend folder structure, routes, endpoints |
+| [03-database-schema.md](03-database-schema.md) | Collections, relationships, indexes, DummyJSON import, checkout and payments |
+| [04-development-phases.md](04-development-phases.md) | Build order, phase by phase |
+| [05-coding-standards.md](05-coding-standards.md) | Coding and web development practices to follow |
+
 ---
 
 ## 1. Goal
@@ -52,6 +61,7 @@ Language: JavaScript (ES modules) on both client and server.
 | 6 | Checkout | `/checkout` | Sign-in required. 1) Shipping address (pick saved or add new), 2) Delivery method (Standard / Expedited / Next Day with estimated dates), 3) Payment (Stripe Card Element), 4) Review items. Order summary sidebar (items, shipping, tax, total), Place order |
 | 7 | Order Confirmation | `/order/:orderNumber/confirmation` | Order number, items, shipping address, delivery method + estimated date, price breakdown, links to order details and to continue shopping |
 | 8 | Account / Orders | `/account`, `/orders`, `/orders/:orderNumber` | Profile (name, email), saved addresses (add/edit/delete/set default), order list with status and filter by time range, order detail page, Cancel (while not yet shipped), Buy it again |
+| 9 | Admin: Catalog | `/admin/products`, `/admin/products/:id`, `/admin/categories` | Admin only. Create, edit, publish, and archive products. Edit variants (price, stock, SKU). Upload and reorder images. Manage the category tree |
 
 Also needed: a 404 page, empty states (empty cart, no results, no orders), and loading skeletons.
 
@@ -63,13 +73,14 @@ Also needed: a 404 page, empty states (empty cart, no results, no orders), and l
 - **Shipping:** Standard is free for subtotals of $35 or more and $5.99 otherwise. It takes 5 business days. Expedited is $9.99 and takes 2 days. Next Day is $14.99.
 - **Tax:** a flat 8% of the subtotal.
 - **Orders store a snapshot of each item** (title, variant label, image, unit price) and of the shipping address. Later edits to a product do not change past orders.
-- **Stock is reserved when the order is created** and released if payment fails or the order is not paid within 30 minutes.
+- **Stock is reserved when the order is created.** It is released if the order isn't paid within 30 minutes or is cancelled. A declined card does not cancel the order: the user can retry with another card while the reservation lasts.
+- **The catalog lives in MongoDB.** Products and categories are imported once from DummyJSON as starter data, and are then managed in the admin pages. The app never calls DummyJSON at runtime.
 - **Buy Now** checks out a single item directly and does not change the cart.
 - **Order status:** `pending_payment` → `paid` → `shipped` → `delivered`. An order can also become `cancelled` from `pending_payment` or `paid`. In the MVP, shipping and delivery status are moved forward by a dev script (`npm run orders:advance`).
 
 ### 3.3 Out of scope for MVP
 
-Seller/marketplace features, admin dashboard UI, recommendation engine, writing reviews, wishlists, returns/refunds UI, email notifications, OAuth login, password reset, multiple currencies or languages, Prime.
+Seller/marketplace features, admin features beyond catalog management (order management, users, reports), recommendation engine, writing reviews, wishlists, returns/refunds UI, email notifications, OAuth login, password reset, multiple currencies or languages, Prime.
 
 ---
 
@@ -88,25 +99,26 @@ Seller/marketplace features, admin dashboard UI, recommendation engine, writing 
 - **RTK Query** (`api` slice) handles all server data: products, search, cart, orders, addresses. Cache tags (`Cart`, `Orders`, `Addresses`) are invalidated after mutations.
 - **`authSlice`** holds the current user and auth status.
 - **`guestCartSlice`** holds the cart while the user is signed out. It is saved to localStorage and sent to `POST /api/cart/merge` after sign in, then cleared.
-- **`checkoutSlice`** holds the selected address, delivery method, and Buy Now item.
+- **`checkoutSlice`** holds only the current `checkoutId` and the Buy Now item. The selected address, delivery method, and price quote are stored on the server in the `checkouts` collection.
 
-### 4.3 Payments (Stripe)
+### 4.3 Checkout and payments (Stripe)
 
-1. The client calls `POST /api/orders`. The server validates stock, reserves it, creates an order with status `pending_payment`, creates a Stripe PaymentIntent for the server-computed total, and returns `{ orderNumber, clientSecret }`.
-2. The client confirms the payment with Stripe Elements (`stripe.confirmCardPayment`).
-3. Stripe calls the webhook `POST /api/webhooks/stripe`:
-   - On `payment_intent.succeeded`, the order is marked `paid` and the purchased items are removed from the cart.
-   - On `payment_intent.payment_failed`, the order is marked `cancelled` and its stock is released.
-4. The client goes to the confirmation page, which polls the order until its status is `paid`.
+The full design is in [03-database-schema.md §5.6–5.9 and §7.5](03-database-schema.md#75-checkout-and-stripe-payment). In summary:
 
-The webhook route uses `express.raw()` and is registered **before** `express.json()` so Stripe signature verification works. Use test card `4242 4242 4242 4242` in development.
+1. Opening `/checkout` creates a **checkout** document on the server with the items, address, delivery method, and a quote calculated on the server.
+2. **Place order** recalculates the quote. If the price changed, the user must confirm again. Otherwise the server reserves stock and creates the order in one transaction, then creates a Stripe **PaymentIntent** (with an idempotency key) and a **payment** document, and returns the `clientSecret`.
+3. The client confirms the card with Stripe Elements. A declined card can be retried with the same PaymentIntent.
+4. Stripe webhooks are verified, recorded in **stripeEvents** so each event is processed only once, and then update the payment and the order (paid, refunded, cancelled).
+5. The confirmation page polls the order until it is `paid`.
+
+The webhook route uses `express.raw()` and is registered **before** `express.json()` so Stripe signature verification works. Card details and the `client_secret` are never stored. Use test card `4242 4242 4242 4242` in development.
 
 ### 4.4 Images (Cloudinary)
 
 - The seed script uploads each product image to Cloudinary under `amazon-clone/products/<slug>/`. It uses a deterministic `public_id`, so running the script again does not create duplicates.
 - Products store the Cloudinary `url` and `publicId` for each image.
 - The frontend requests resized images with Cloudinary transformations (for example, `w_400,f_auto,q_auto` for cards).
-- `POST /api/uploads` (multer memory storage → Cloudinary upload stream) is admin-only and exists for adding products later.
+- `POST /api/admin/uploads` (multer memory storage → Cloudinary upload stream) is admin-only and used by the admin product pages. Removing an image from a product also deletes it from Cloudinary.
 
 ### 4.5 Stock reservation and transactions
 
@@ -114,217 +126,48 @@ Order creation runs in a MongoDB transaction. For each item, stock is decremente
 
 ---
 
-## 5. Data Model (Mongoose)
+## 5. Data Model
 
-```js
-User {
-  name, email (unique, lowercase), passwordHash, role: 'user' | 'admin',
-  addresses: [{ fullName, line1, line2, city, state, zip, country, phone, isDefault }],
-  timestamps
-}
+The full schema is in [03-database-schema.md](03-database-schema.md). MongoDB holds 9 collections:
 
-Category {
-  name, slug (unique), image, parent: ObjectId<Category> | null
-}
-
-Product {
-  title, slug (unique), brand, category: ObjectId<Category>,
-  description, bullets: [String],
-  images: [{ url, publicId }],
-  variants: [{
-    _id, sku (unique), label,                 // e.g. "Black / 128GB"
-    attributes: { color, size, ... },
-    priceCents, listPriceCents, stock,
-    images: [{ url, publicId }]               // optional, falls back to product images
-  }],
-  ratingAvg, ratingCount,
-  minPriceCents,                              // denormalized for sorting and filtering
-  inStock,                                    // denormalized: any variant with stock > 0
-  timestamps
-}
-// indexes: text index on { title, brand, description }, { category, minPriceCents }, { ratingAvg }
-
-Review {
-  product: ObjectId<Product>, user: ObjectId<User> | null, authorName,
-  rating (1-5), title, body, timestamps
-}
-
-Cart {
-  user: ObjectId<User> (unique),
-  items: [{ product, variantId, qty, savedForLater, addedPriceCents }],
-  timestamps
-}
-
-Order {
-  orderNumber (unique, e.g. "112-4839201-5573019"), user: ObjectId<User>,
-  items: [{ product, variantId, title, variantLabel, image, unitPriceCents, qty }],
-  shippingAddress: { ...snapshot },
-  deliveryMethod: 'standard' | 'expedited' | 'nextday', estimatedDelivery: Date,
-  subtotalCents, shippingCents, taxCents, totalCents,
-  status: 'pending_payment' | 'paid' | 'shipped' | 'delivered' | 'cancelled',
-  payment: { stripePaymentIntentId, last4, brand },
-  paidAt, shippedAt, deliveredAt, cancelledAt,
-  source: 'cart' | 'buy_now',
-  timestamps
-}
-```
-
-Every product has at least one variant, so the cart and order code only has to handle variants.
+| Collection | Holds |
+|---|---|
+| `users` | Accounts, roles (`user` / `admin`), embedded addresses |
+| `categories` | Two-level tree (department → category), managed by admins |
+| `products` | Catalog with embedded variants (SKU, price, stock), `draft` / `active` / `archived` status, managed by admins |
+| `reviews` | Product reviews |
+| `carts` | One cart per signed-in user |
+| `checkouts` | Server-side checkout state and price quote |
+| `orders` | Orders with item and address snapshots |
+| `payments` | One Stripe PaymentIntent per order, with card summary, errors, and refunds |
+| `stripeEvents` | Webhook events received, so each is processed only once |
 
 ---
 
 ## 6. API Endpoints
 
-All endpoints are prefixed with `/api`. 🔒 means a signed-in user is required. 🛡 means the admin role is required.
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/auth/signup` | Create an account and set the auth cookie |
-| POST | `/auth/signin` | Sign in and set the auth cookie |
-| POST | `/auth/signout` | Clear the auth cookie |
-| GET | `/auth/me` 🔒 | Current user |
-| GET | `/categories` | All categories |
-| GET | `/products` | Search/list: `q, category, minPrice, maxPrice, rating, brand, inStock, sort, page, limit` → `{ items, total, page, pages, facets: { brands } }` |
-| GET | `/products/home` | Homepage rows (best sellers, new arrivals, top rated) |
-| GET | `/products/:slug` | Product detail |
-| GET | `/products/:slug/reviews` | Paginated reviews + rating histogram |
-| GET | `/cart` 🔒 | Cart with current prices and stock |
-| POST | `/cart/items` 🔒 | Add `{ variantId, qty }` |
-| PATCH | `/cart/items/:itemId` 🔒 | Update `{ qty }` or `{ savedForLater }` |
-| DELETE | `/cart/items/:itemId` 🔒 | Remove item |
-| POST | `/cart/merge` 🔒 | Merge guest cart `[{ variantId, qty }]` |
-| POST | `/checkout/quote` 🔒 | `{ items or useCart, deliveryMethod }` → totals |
-| GET/POST/PATCH/DELETE | `/users/me/addresses[/:id]` 🔒 | Manage addresses |
-| POST | `/orders` 🔒 | Create order + PaymentIntent → `{ orderNumber, clientSecret }` |
-| GET | `/orders` 🔒 | Order history (`?range=30d|3m|2026|...`) |
-| GET | `/orders/:orderNumber` 🔒 | Order detail |
-| POST | `/orders/:orderNumber/cancel` 🔒 | Cancel (only if `pending_payment` or `paid`) |
-| POST | `/webhooks/stripe` | Stripe webhook (raw body, signature verified) |
-| POST | `/uploads` 🛡 | Image upload to Cloudinary |
-
-Error response shape: `{ message, details? }` with the matching HTTP status code.
+The complete endpoint list, grouped by router, is in [02-project-structure.md §3.4](02-project-structure.md#34-endpoints-by-router). All endpoints are under `/api`. Admin endpoints are under `/api/admin` and require the `admin` role. Errors use the shape `{ message, details? }`.
 
 ---
 
 ## 7. File Structure
 
+The full frontend and backend structure is in [02-project-structure.md](02-project-structure.md). At the top level:
+
 ```
 AmazonClone/
+├── client/          # React + Vite
+├── server/          # Node + Express API
+├── e2e/             # Playwright tests
 ├── planning-docs/
-│   └── 01-initial-plan.md
-├── package.json                  # root scripts: dev (runs client + server), seed
-├── .gitignore
-├── README.md
-│
-├── client/                       # React + Vite
-│   ├── index.html
-│   ├── vite.config.js            # Tailwind plugin, /api proxy → :5000
-│   ├── package.json
-│   ├── .env.example
-│   ├── public/
-│   └── src/
-│       ├── main.jsx              # Provider, Router, Stripe Elements
-│       ├── App.jsx               # Route definitions
-│       ├── index.css             # @import "tailwindcss"; theme tokens
-│       ├── app/
-│       │   └── store.js
-│       ├── features/
-│       │   ├── api/apiSlice.js           # RTK Query base (credentials: 'include')
-│       │   ├── auth/
-│       │   │   ├── authSlice.js
-│       │   │   └── authApi.js
-│       │   ├── products/productsApi.js
-│       │   ├── cart/
-│       │   │   ├── cartApi.js
-│       │   │   └── guestCartSlice.js
-│       │   ├── checkout/
-│       │   │   ├── checkoutSlice.js
-│       │   │   └── checkoutApi.js
-│       │   ├── orders/ordersApi.js
-│       │   └── account/addressesApi.js
-│       ├── pages/
-│       │   ├── HomePage.jsx
-│       │   ├── SearchPage.jsx
-│       │   ├── ProductPage.jsx
-│       │   ├── CartPage.jsx
-│       │   ├── SignInPage.jsx
-│       │   ├── SignUpPage.jsx
-│       │   ├── CheckoutPage.jsx
-│       │   ├── OrderConfirmationPage.jsx
-│       │   ├── AccountPage.jsx
-│       │   ├── OrdersPage.jsx
-│       │   ├── OrderDetailPage.jsx
-│       │   └── NotFoundPage.jsx
-│       ├── components/
-│       │   ├── layout/           # Header, SearchBar, SubNav, Footer, Layout
-│       │   ├── home/             # HeroCarousel, CategoryTiles, ProductRow
-│       │   ├── product/          # ProductCard, Gallery, VariantSelector, BuyBox, Reviews
-│       │   ├── search/           # FilterSidebar, SortSelect, Pagination
-│       │   ├── cart/             # CartItem, SavedItem, SubtotalBox
-│       │   ├── checkout/         # AddressStep, DeliveryStep, PaymentStep, OrderSummary
-│       │   ├── orders/           # OrderCard, StatusBadge
-│       │   └── ui/               # Button, Rating, Price, Spinner, Skeleton, Modal
-│       ├── routes/
-│       │   └── ProtectedRoute.jsx
-│       ├── hooks/                # useAuth, useCart (merges guest/server cart), useQueryParams
-│       └── utils/                # formatPrice, cloudinaryUrl, deliveryDate
-│
-└── server/                       # Node + Express
-    ├── package.json
-    ├── .env.example
-    └── src/
-        ├── server.js             # connect DB, start listening
-        ├── app.js                # middleware, routes, error handler
-        ├── config/
-        │   ├── env.js            # validated env vars
-        │   ├── db.js
-        │   ├── cloudinary.js
-        │   └── stripe.js
-        ├── models/
-        │   ├── User.js
-        │   ├── Category.js
-        │   ├── Product.js
-        │   ├── Review.js
-        │   ├── Cart.js
-        │   └── Order.js
-        ├── routes/               # one router per resource, mounted under /api
-        │   ├── auth.routes.js
-        │   ├── category.routes.js
-        │   ├── product.routes.js
-        │   ├── cart.routes.js
-        │   ├── checkout.routes.js
-        │   ├── user.routes.js
-        │   ├── order.routes.js
-        │   ├── upload.routes.js
-        │   └── webhook.routes.js
-        ├── controllers/          # request/response handling per resource
-        ├── services/
-        │   ├── pricing.service.js     # subtotal, shipping, tax, total
-        │   ├── order.service.js       # create (transaction), cancel, release stock
-        │   ├── cart.service.js        # merge, hydrate with current price/stock
-        │   └── search.service.js      # build Mongo query + sort from params
-        ├── middleware/
-        │   ├── protect.js        # JWT cookie → req.user
-        │   ├── requireAdmin.js
-        │   ├── validate.js       # Zod schema → 400
-        │   ├── rateLimit.js
-        │   └── errorHandler.js
-        ├── validators/           # Zod schemas per route
-        ├── utils/                # asyncHandler, ApiError, generateOrderNumber, token
-        ├── jobs/
-        │   └── expirePendingOrders.js  # release stock after 30 min unpaid
-        └── seed/
-            ├── seed.js           # npm run seed / seed:destroy
-            ├── advanceOrders.js  # npm run orders:advance
-            ├── transform.js      # source data → Product/Variant/Review shape
-            └── data/             # cached source JSON
+└── package.json     # Root scripts: dev, seed, stripe:listen
 ```
 
 ---
 
 ## 8. Seed Data
 
-The full DummyJSON analysis, the category mapping, and the variant rules are in [03-database-schema.md §2](03-database-schema.md#2-source-data-dummyjson). In summary:
+The full DummyJSON analysis, the category mapping, and the variant rules are in [03-database-schema.md §2–3](03-database-schema.md#3-source-data-dummyjson-initial-import-only). In summary:
 
 - **Source:** product data from the [DummyJSON](https://dummyjson.com/products?limit=0) API (194 products, checked 2026-10-04). 184 are used, because vehicles and motorcycles are excluded. The JSON is cached in `server/src/seed/data/` so seeding works without a network connection, apart from the Cloudinary upload.
 - **Categories:** 6 departments (Electronics, Fashion, Home & Kitchen, Grocery, Sports & Outdoors, Beauty & Personal Care) containing 22 categories mapped from the source.
@@ -332,8 +175,9 @@ The full DummyJSON analysis, the category mapping, and the variant rules are in 
 - **Ratings and reviews:** reviews come from the source data, with extra reviews generated using `@faker-js/faker` so each product has 3–15. `ratingAvg` and `ratingCount` are calculated from the reviews.
 - **Users:** a demo user (`demo@example.com` / `Password123!`) with an address and a few past orders in different statuses, plus an admin user.
 - **Commands:**
-  - `npm run seed` clears the collections, inserts all data, and uploads any images missing from Cloudinary.
-  - `npm run seed:destroy` clears the collections.
+  - `npm run seed:fetch` saves the DummyJSON snapshot to `server/src/seed/data/` (already verified, run once).
+  - `npm run seed` imports the snapshot into an **empty** database. It refuses to run if the catalog already has data, so your own edits are never overwritten.
+  - `npm run seed -- --reset` wipes and re-imports (development only).
 
 ---
 
@@ -437,7 +281,9 @@ export default defineConfig({
   "dev": "nodemon src/server.js",
   "start": "node src/server.js",
   "seed": "node src/seed/seed.js",
-  "seed:destroy": "node src/seed/seed.js --destroy",
+  "seed:reset": "node src/seed/seed.js --reset",
+  "seed:fetch": "node src/seed/fetchSource.js",
+  "catalog:resync": "node src/seed/resyncCatalog.js",
   "orders:advance": "node src/seed/advanceOrders.js"
 }
 ```

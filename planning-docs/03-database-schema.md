@@ -1,35 +1,72 @@
 # Database Schema
 
-This document defines the MongoDB collections for the Amazon clone: their fields, the relationships between them, the indexes they need, and how they support each of the app's main flows. Product and category data comes from the DummyJSON products API (see section 2).
+This document defines the MongoDB collections for the Amazon clone: their fields, the relationships between them, the indexes they need, and how they support each of the app's main flows. It covers:
 
-Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md](02-project-structure.md), [04-development-phases.md](04-development-phases.md).
+- the catalog (products and categories), which is owned and managed in MongoDB
+- the shopping data: users, carts, and reviews
+- the checkout and payment data: checkouts, orders, Stripe payments, and webhook events
+
+Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md](02-project-structure.md), [04-development-phases.md](04-development-phases.md), [05-coding-standards.md](05-coding-standards.md).
 
 ---
 
 ## 1. Overview
 
-| Collection | Purpose | Approx. size (seeded) |
+| Collection | Purpose | Approx. size after seeding |
 |---|---|---|
-| `users` | Accounts, credentials, saved addresses | 2 seeded (demo + admin), grows with sign-ups |
-| `categories` | Two-level category tree (department → category) | 6 departments + 22 categories |
-| `products` | Catalog, with variants embedded | 184 |
-| `reviews` | Product reviews | ~1,600 (3–15 per product) |
+| `users` | Accounts, credentials, saved addresses | 2 (demo + admin), grows with sign-ups |
+| `categories` | Two-level category tree (department → category), managed by admins | 28 (6 + 22) |
+| `products` | Catalog with embedded variants, managed by admins | 184 |
+| `reviews` | Product reviews | ~1,600 |
 | `carts` | One cart per signed-in user | 1 per user |
-| `orders` | Placed orders with item and address snapshots | Seeded history for the demo user, then grows |
+| `checkouts` | One checkout session per attempt: items, address, delivery method, price quote | Short-lived, open ones expire after 24 h |
+| `orders` | Placed orders with item and address snapshots | 4 seeded, then grows |
+| `payments` | One Stripe PaymentIntent per order: status, card, errors, refunds | 1 per order |
+| `stripeEvents` | Log of received Stripe webhook events, so each is processed only once | Kept 90 days |
 
 General conventions:
 
 - All monetary values are **integer cents** (`priceCents: 1999` = $19.99).
 - All collections have `createdAt` / `updatedAt` (Mongoose `timestamps: true`).
 - References use `ObjectId` with `ref` so `populate()` works.
-- Data is **embedded** when it is always read together with its parent and is bounded in size (variants, cart items, order items, addresses). Data is **referenced** when it grows without bound or is read on its own (reviews, orders).
+- Data is **embedded** when it is always read together with its parent and is bounded in size (variants, cart items, order items, addresses, refunds). Data is **referenced** when it grows without bound or is read on its own (reviews, orders, payments).
 - The guest cart is **not** stored in MongoDB. It lives in the browser (Redux + localStorage) and is merged into `carts` when the guest signs in.
 
 ---
 
-## 2. Source Data: DummyJSON
+## 2. Catalog Ownership: From DummyJSON to MongoDB
 
-### 2.1 Endpoints tested (2026-10-04)
+**MongoDB is the only source of truth for products and categories.** DummyJSON is used **once**, as starter content for the first import. After that the catalog is managed in MongoDB through the admin catalog pages (or Compass/Atlas), and the app never calls DummyJSON.
+
+```
+  (one time)                         (one time)                       (ongoing)
+DummyJSON API ──seed:fetch──► seed/data/*.json ──seed──► MongoDB ◄──── Admin catalog pages
+                                                       categories        (create, edit, archive
+                                                       products          products, categories,
+                                                       reviews           variants, images)
+                                                          │
+                                                          ▼
+                                            Express API ──► React app
+```
+
+| Step | Command | What happens | When |
+|---|---|---|---|
+| 1. Snapshot | `npm run seed:fetch` | Downloads `/products?limit=0` and `/products/categories` into `server/src/seed/data/` (committed to git) | Once. Already verified working |
+| 2. Import | `npm run seed` | Creates the categories, products, and reviews from the snapshot, uploads the images to Cloudinary, and creates demo users and orders | Once per database (local, then production) |
+| 3. Manage | Admin pages at `/admin/*` | Add, edit, and archive products and categories. Upload images. Change prices and stock | Ongoing |
+
+**Seed safety rules**, so that your own edits are never lost:
+
+- `npm run seed` checks first and **refuses to run if the `products` or `categories` collections already contain documents**. It prints the counts and exits.
+- `npm run seed -- --reset` drops **all** collections and re-imports. It only works when `NODE_ENV !== "production"`, and it asks for confirmation (`--yes` skips the prompt).
+- Imported documents are marked `source.provider: "dummyjson"`, and anything created in the admin pages is marked `source.provider: "manual"`. Once imported, the two kinds are managed the same way. The marker only records where a document came from.
+- After the import, the files in `seed/data/` are only needed to re-seed a fresh development database. They can be deleted without affecting the running app.
+
+---
+
+## 3. Source Data: DummyJSON (initial import only)
+
+### 3.1 Endpoints tested (2026-10-04)
 
 All tested endpoints responded correctly. A typical response took about 0.6–0.9 s.
 
@@ -46,11 +83,9 @@ All tested endpoints responded correctly. A typical response took about 0.6–0.
 | `GET /products?sortBy=price&order=desc` | 200 | Sorting works |
 | Image CDN `cdn.dummyjson.com/product-images/...webp` | 200 | All **668** image + thumbnail URLs checked, 0 failures |
 
-Rate limit: the API returns `x-ratelimit-limit: 100`. Because `limit=0` returns the whole catalog in a single call, the seed needs only 2 API calls (products and categories).
+The API returns `x-ratelimit-limit: 100`. Because `limit=0` returns the whole catalog in a single call, the snapshot needs only 2 API calls.
 
-**The live API is used only to build the seed.** The app never calls DummyJSON at runtime. The seed script reads a cached copy in `server/src/seed/data/` (`npm run seed:fetch` refreshes it), so seeding still works if DummyJSON is down or changes.
-
-### 2.2 DummyJSON product shape
+### 3.2 DummyJSON product shape
 
 ```json
 {
@@ -82,25 +117,43 @@ Rate limit: the API returns `x-ratelimit-limit: 100`. Because `limit=0` returns 
 }
 ```
 
-### 2.3 What the data looks like, and what the seed has to fix
+DummyJSON category shape: `{ "slug": "beauty", "name": "Beauty", "url": "https://dummyjson.com/products/category/beauty" }`.
 
-| Finding | Impact | How the seed handles it |
+### 3.3 How DummyJSON fields map to our schema
+
+| DummyJSON field | Our field | Transformation |
 |---|---|---|
-| 194 products, 24 flat categories, no hierarchy | Amazon uses departments with sub-categories | Map the 24 categories into 6 departments (section 2.4) |
-| `vehicle` (5) and `motorcycle` (5) cost $3k–$37k | Not realistic for a cart and checkout | **Excluded.** 184 products remain |
-| **No variants** | The product page and cart are designed around variants | Generate variants per category (section 2.5) |
-| `brand` missing on 92 of 194 (all groceries, kitchen, sports, tops, dresses, jewellery, home decor) | The brand filter would show blanks | Default to `"Generic"` |
-| Exactly 3 reviews per product, all dated 2025-04-30, and the source `rating` doesn't match their average | Thin and inconsistent review data | Keep the 3 source reviews, add 0–12 generated ones (faker) with ratings skewed toward the source `rating` and dates spread over the past 18 months, then compute `ratingAvg` from the stored reviews |
-| No "About this item" bullets | The product page needs bullets | Split `description` into sentences, then add warranty, return policy, and shipping as extra bullets |
-| `price` is the selling price and `discountPercentage` is 0.04–19.61% | Amazon shows a strikethrough "List" price | `listPriceCents = round(price / (1 - discount/100) * 100)`. It is shown only when the discount is at least 5% |
-| `stock` 0–100, 4 products at 0 | Out-of-stock states can be tested | Split stock across the generated variants |
-| `minimumOrderQuantity` up to 48 | Doesn't fit retail shopping | Ignored |
-| One duplicate title: "Rolex Cellini Moonphase" (ids 96 men's, 191 women's) | Slug collision | Add a suffix to the duplicate slug (`-2`) |
-| 41 image URLs contain `'`, `&`, or spaces | Requests fail without encoding | `encodeURI()` before fetching or uploading |
-| `meta.barcode`, `qrCode`, `reviewerEmail` | Not needed | Dropped |
-| No sales data | "Best Sellers" needs a ranking | Seed `salesCount` with a random value weighted by rating and review count |
+| `id` | `source.externalId` | As is, with `source.provider = "dummyjson"` |
+| `title` | `title`, `slug` | Slug = `slugify(title)`, with `-2` added on collision |
+| `description` | `description`, `bullets` | Bullets = description split into sentences + warranty, returns, and shipping lines |
+| `category` | `category` (+ `department`) | Through the category mapping (§3.5) |
+| `brand` | `brand` | Missing → `"Generic"` |
+| `price`, `discountPercentage` | `variants[].priceCents`, `listPriceCents` | `round(price*100)`. List price only if the discount is at least 5% |
+| `stock` | `variants[].stock` | Split across the generated variants |
+| `sku` | `variants[].sku` | Source SKU + variant suffix |
+| `tags` | `tags` | As is |
+| `images` | `images[]` | Uploaded to Cloudinary, store `{ url, publicId, alt }` |
+| `thumbnail` | (not stored) | Thumbnails come from Cloudinary transforms of `images[0]` |
+| `weight`, `dimensions`, `warrantyInformation`, `returnPolicy`, `shippingInformation` | `specs` | As is |
+| `reviews[]` | `reviews` collection | `reviewerName` → `authorName`, `comment` → `body` |
+| `rating` | (used as a target) | Generated reviews are skewed toward it, then `ratingAvg` is calculated from the reviews |
+| `availabilityStatus`, `minimumOrderQuantity`, `meta`, `reviewerEmail` | (dropped) | Calculated from stock, or not needed |
 
-### 2.4 Category mapping (24 → 6 departments, 22 categories)
+### 3.4 What the data looks like, and what the import has to fix
+
+| Finding | How the import handles it |
+|---|---|
+| 194 products in 24 flat categories, with no hierarchy | Map them into 6 departments (§3.5) |
+| `vehicle` (5) and `motorcycle` (5) cost $3k–$37k | **Excluded**, which leaves 184 products |
+| **No variants** | Generate variants per category (§3.6) |
+| `brand` missing on 92 of 194 | Default to `"Generic"` |
+| Exactly 3 reviews per product, all dated 2025-04-30, and the source `rating` doesn't match their average | Keep them, add 0–12 generated reviews (faker) with dates spread over the past 18 months, then calculate `ratingAvg` |
+| `stock` ranges 0–100, and 4 products have 0 | Lets the out-of-stock states be tested |
+| One duplicate title: "Rolex Cellini Moonphase" (ids 96, 191) | Add a slug suffix to the duplicate |
+| 41 image URLs contain `'`, `&`, or spaces | `encodeURI()` before fetching or uploading |
+| No sales data | Seed `salesCount` with a random value weighted by rating and review count |
+
+### 3.5 Category mapping (24 → 6 departments, 22 categories)
 
 | Department (`level 0`) | Categories (`level 1`) ← DummyJSON slug | Products |
 |---|---|---|
@@ -112,81 +165,90 @@ Rate limit: the API returns `x-ratelimit-limit: 100`. Because `limit=0` returns 
 | **Beauty & Personal Care** | Makeup ← `beauty` · Fragrances ← `fragrances` · Skin Care ← `skin-care` | 13 |
 | *(excluded)* | `vehicle`, `motorcycle` | 10 |
 
-This mapping lives in `server/src/seed/categoryMap.js`.
+This mapping lives in `server/src/seed/categoryMap.js` and is only used during the import. Categories added later are created in the admin pages.
 
-### 2.5 Variant generation rules
+### 3.6 Variant generation rules (import only)
 
-The product images show one color per product, so the seed varies **size and configuration only**, never color. Every product's images stay accurate for all of its variants.
+The product images show one color per product, so the import varies **size and configuration only**, never color. Products added later in the admin pages can use any option name, including Color, with images per variant.
 
-| Categories | Option | Values | Price rule |
+| Categories | `optionName` | Values | Price rule |
 |---|---|---|---|
 | Men's Shirts, Women's Tops, Women's Dresses | Size | S, M, L, XL | Same price |
 | Men's Shoes | Size | US 8, 9, 10, 11, 12 | Same price |
 | Women's Shoes | Size | US 5, 6, 7, 8, 9 | Same price |
 | Smartphones, Tablets | Storage | 128 GB, 256 GB, 512 GB | +$0 / +$100 / +$200 |
 | Laptops | Configuration | 16 GB / 512 GB, 32 GB / 1 TB | +$0 / +$300 |
-| Everything else | none | One default variant labelled "Standard" | Source price |
+| Everything else | `null` | One default variant labelled "Standard" | Source price |
 
-- Variant SKU = source SKU + suffix (`BEA-ESS-ESS-001`, `MEN-XYZ-001-M`, `SMA-APP-IPH-005-256`).
-- The source `stock` is split randomly across the variants. About 10% of variants get stock 0, so "Currently unavailable" and "Only N left" can be tested. Products with source stock 0 get 0 on every variant.
-- The first in-stock variant is marked `isDefault`.
+The source `stock` is split randomly across the variants. About 10% of variants get stock 0. The first in-stock variant is marked `isDefault`.
 
 ---
 
-## 3. Relationships
+## 4. Relationships
 
 ```
-                    ┌──────────────┐
-                    │  categories  │◄──┐ parent (self-ref, null for departments)
-                    └──────┬───────┘───┘
-         department, category │ (N:1)
-                    ┌──────▼───────┐ 1      N ┌───────────┐
-                    │   products   │◄─────────┤  reviews  │──┐
-                    │  └ variants[]│          └───────────┘  │ user (N:1, optional)
-                    └──────▲───────┘                         │
-   items[].product,        │                                 │
-   items[].variantId (N:1) │                                 ▼
-          ┌────────────────┴───┐              ┌──────────────────┐
-          │       carts        │──── user ───►│      users       │
-          │  └ items[]         │  (1:1)       │  └ addresses[]   │
-          └────────────────────┘              └────────▲─────────┘
-          ┌────────────────────┐   user (N:1)          │
-          │       orders       │───────────────────────┘
-          │  └ items[] (snapshot, keeps product/variant ids for "Buy it again")
-          │  └ shippingAddress (snapshot)
-          └────────────────────┘
+                         ┌──────────────┐
+             ┌──────────►│  categories  │◄──┐ parent (self-ref, null = department)
+             │           └──────▲───────┘───┘
+             │   department,    │
+             │   category (N:1) │
+             │           ┌──────┴───────┐ 1      N ┌───────────┐
+             │           │   products   │◄─────────┤  reviews  │
+             │           │  └ variants[]│          └─────┬─────┘
+             │           └──────▲───────┘                │ user (optional)
+  createdBy, │   product +      │                        ▼
+  updatedBy  │   variantId      │                 ┌──────────────┐
+             │   (N:1)          │                 │    users     │
+             │       ┌──────────┴──────────┐      │ └ addresses[]│
+             │       │ carts.items[]       │─────►│              │◄─────────────┐
+             │       │ checkouts.items[]   │ user └──────▲───────┘              │
+             │       │ orders.items[]      │             │ user                 │ user
+             │       └─────────────────────┘             │                      │
+             │                                    ┌──────┴───────┐ 1   1 ┌──────┴──────┐
+             └────────────────────────────────────┤  checkouts   ├──────►│   orders    │
+                                                  └──────────────┘ order └──────┬──────┘
+                                                                                │ 1
+                                                                                │ payment
+                                                                                ▼ 1
+                                             ┌──────────────┐  paymentIntentId ┌─────────────┐
+                                             │ stripeEvents │ ················►│  payments   │
+                                             └──────────────┘  (lookup, no ref)│ └ refunds[] │
+                                                                               └─────────────┘
 ```
 
 | From | To | Type | Stored as | Notes |
 |---|---|---|---|---|
-| `categories.parent` | `categories` | N:1 | ObjectId | `null` for departments |
-| `products.department` | `categories` (level 0) | N:1 | ObjectId | Denormalized so filtering by department needs no lookup |
+| `categories.parent` | `categories` | N:1 | ObjectId \| null | `null` for departments |
+| `products.department` | `categories` (level 0) | N:1 | ObjectId | Stored on the product so filtering by department needs no lookup. Kept in sync with `category.parent` |
 | `products.category` | `categories` (level 1) | N:1 | ObjectId | |
-| `products.variants` | (embedded) | 1:N | subdocuments | Max ~5 per product |
-| `reviews.product` | `products` | N:1 | ObjectId | Kept separate because reviews are paginated and unbounded |
-| `reviews.user` | `users` | N:1 | ObjectId \| null | `null` for seeded reviewers, who only have an `authorName` |
-| `users.addresses` | (embedded) | 1:N | subdocuments | Max 10 |
-| `carts.user` | `users` | 1:1 | ObjectId (unique) | |
-| `carts.items[].product` + `variantId` | `products` / variant | N:1 | ObjectId + ObjectId | Prices and stock are read live from the product |
+| `products/categories.createdBy`, `updatedBy` | `users` (admin) | N:1 | ObjectId \| null | `null` for imported documents |
+| `reviews.product` | `products` | N:1 | ObjectId | |
+| `reviews.user` | `users` | N:1 | ObjectId \| null | `null` for seeded reviewers |
+| `carts.user` | `users` | 1:1 | ObjectId, unique | |
+| `carts.items[]`, `checkouts.items[]` | `products` + variant | N:1 | ObjectId + variant ObjectId | Prices are read live from the product |
+| `checkouts.user` | `users` | N:1 | ObjectId | |
+| `checkouts.order` ↔ `orders.checkout` | | 1:1 | ObjectId, unique on `orders.checkout` | Set when the order is placed |
 | `orders.user` | `users` | N:1 | ObjectId | |
-| `orders.items[]` | `products` / variant | N:1 | ObjectId + snapshot fields | Display uses the snapshot. The ids are only used for "Buy it again" and links |
+| `orders.items[]` | `products` + variant | N:1 | ObjectId + snapshot fields | Display uses the snapshot |
+| `orders.payment` ↔ `payments.order` | | 1:1 | ObjectId, unique on `payments.order` | |
+| `payments.user` | `users` | N:1 | ObjectId | |
+| `stripeEvents.objectId` | `payments.stripePaymentIntentId` | lookup | String | Not a Mongo reference. Events are matched by Stripe id |
 
 ---
 
-## 4. Collections
+## 5. Collections
 
 Types use Mongoose terms. **R** = required, **U** = unique.
 
-### 4.1 `users`
+### 5.1 `users`
 
 | Field | Type | Rules | Notes |
 |---|---|---|---|
 | `name` | String | R, trim, 2–50 chars | |
 | `email` | String | R, U, lowercase, trim | Login identifier |
 | `passwordHash` | String | R, `select: false` | bcrypt, cost 12. Never returned by the API |
-| `role` | String | enum `user` \| `admin`, default `user` | `admin` is used for `/api/uploads` only |
+| `role` | String | enum `user` \| `admin`, default `user` | `admin` can use `/admin/*` and `/api/admin/*` |
 | `addresses` | [Address] | max 10 | Embedded, see below |
-| `createdAt`, `updatedAt` | Date | auto | |
 
 **Address** (subdocument, has its own `_id`)
 
@@ -196,272 +258,438 @@ Types use Mongoose terms. **R** = required, **U** = unique.
 | `line1` | String | R |
 | `line2` | String | optional |
 | `city` | String | R |
-| `state` | String | R |
-| `zip` | String | R, 5-digit or ZIP+4 |
+| `state` | String | R, 2-letter code |
+| `zip` | String | R, `^\d{5}(-\d{4})?$` |
 | `country` | String | R, default `"US"` |
 | `phone` | String | R |
-| `isDefault` | Boolean | default `false`. At most one per user, enforced in the service layer |
+| `isDefault` | Boolean | At most one per user, enforced in the service layer |
 
-### 4.2 `categories`
-
-| Field | Type | Rules | Notes |
-|---|---|---|---|
-| `name` | String | R | "Electronics", "Smartphones" |
-| `slug` | String | R, U | Used in URLs: `/c/electronics`, `/c/smartphones` |
-| `parent` | ObjectId → categories | default `null` | `null` = department |
-| `level` | Number | 0 \| 1 | 0 = department, 1 = category |
-| `image` | `{ url, publicId }` | optional | Tile image for the homepage and category page (taken from the first product's image) |
-| `sortOrder` | Number | default 0 | Order in the nav and sidebar |
-| `sourceSlugs` | [String] | | DummyJSON slugs mapped to this category (seed only) |
-
-The whole category tree is 28 documents. The client loads it once (`GET /api/categories`) and keeps it cached for the header, the "All" sidebar, and the filter sidebar.
-
-### 4.3 `products`
+### 5.2 `categories` (managed catalog)
 
 | Field | Type | Rules | Notes |
 |---|---|---|---|
-| `title` | String | R, trim | |
-| `slug` | String | R, U | `/p/:slug` |
-| `brand` | String | R, default `"Generic"` | Used by the brand filter |
-| `department` | ObjectId → categories | R | Level-0 category |
-| `category` | ObjectId → categories | R | Level-1 category |
-| `description` | String | R | |
-| `bullets` | [String] | | "About this item" |
-| `tags` | [String] | | Included in text search |
-| `images` | [{ `url`, `publicId`, `alt` }] | R, min 1 | Cloudinary. The first image is the card image, and thumbnails come from Cloudinary transforms |
-| `optionName` | String \| null | | `"Size"`, `"Storage"`, `"Configuration"`, or `null` for single-variant products |
-| `variants` | [Variant] | R, min 1 | See below |
-| `specs` | `{ weightOz, dimensions: { width, height, depth }, warranty, returnPolicy, shippingNote }` | | "Product information" table on the product page |
-| `ratingAvg` | Number | 0–5, 1 decimal | Recomputed when reviews change |
+| `name` | String | R, trim, 2–60 chars | "Electronics", "Smartphones" |
+| `slug` | String | R, U, lowercase, `^[a-z0-9-]+$` | Generated from the name, editable. URL: `/c/:slug` |
+| `description` | String | max 500 | Optional text on the category page |
+| `parent` | ObjectId → categories | default `null` | `null` = department. A category's parent must be a department, so there are at most 2 levels |
+| `level` | Number | 0 \| 1 | Calculated from `parent` in `pre('validate')` |
+| `image` | `{ url, publicId, alt }` | optional | Tile on the homepage and department pages |
+| `sortOrder` | Number | default 0 | Order in the nav, sidebar, and filters |
+| `isActive` | Boolean | default `true` | Inactive categories (and their products) are hidden from shoppers |
+| `source` | `{ provider: "dummyjson" \| "manual", externalId: String \| null, importedAt: Date \| null }` | R | Records where the category came from |
+| `createdBy`, `updatedBy` | ObjectId → users \| null | | Set by the admin API |
+
+**Rules for managing categories** (enforced in `adminCategory.service.js`):
+
+- A category **cannot be deleted** if any product or child category references it. It has to be emptied or deactivated first.
+- Moving a category to another department (changing `parent`) also updates `department` on all of its products, inside the same transaction.
+- Deactivating a department hides all of its categories from shoppers.
+
+### 5.3 `products` (managed catalog)
+
+| Field | Type | Rules | Notes |
+|---|---|---|---|
+| `title` | String | R, trim, 3–200 chars | |
+| `slug` | String | R, U, lowercase | Generated from the title when the product is created, editable |
+| `brand` | String | R, trim, default `"Generic"` | Brand filter |
+| `department` | ObjectId → categories | R | Always set to the category's parent by a hook. Never set from client input |
+| `category` | ObjectId → categories | R | Must be a level-1 category |
+| `description` | String | R, max 5,000 | |
+| `bullets` | [String] | max 10, each max 300 | "About this item" |
+| `tags` | [String] | max 20, lowercase | Included in text search |
+| `images` | [{ `url`, `publicId`, `alt` }] | R (min 1 when `active`), max 10 | Cloudinary. The order of the array is the display order |
+| `optionName` | String \| null | | "Size", "Storage", "Color", or `null` for single-variant products |
+| `variants` | [Variant] | R, 1–20 | See below |
+| `specs` | `{ weightOz, dimensions: { width, height, depth }, warranty, returnPolicy, shippingNote }` | all optional | "Product information" table |
+| `status` | String | enum `draft` \| `active` \| `archived`, default `draft` | Only `active` products are visible to shoppers. Imported products start as `active` |
+| `ratingAvg` | Number | 0–5 | Recalculated when reviews change |
 | `ratingCount` | Number | default 0 | |
-| `ratingBreakdown` | `{ 1: Number, 2: …, 5: … }` | | Rating histogram on the product page |
-| `minPriceCents` | Number | R | Lowest price across variants. Used to filter and sort by price |
-| `maxPriceCents` | Number | R | |
-| `maxDiscountPercent` | Number | | For the "% off" badge on cards |
-| `totalStock` | Number | | Sum of variant stock |
-| `inStock` | Boolean | | `totalStock > 0`. Used by the "In stock" filter |
-| `salesCount` | Number | default 0 | "Best Sellers" ranking and relevance tie-break. Incremented when an order is paid |
-| `isActive` | Boolean | default `true` | Inactive products are hidden from listing and search |
-| `source` | `{ provider: "dummyjson", id: Number }` | | Lets the seed update existing products instead of duplicating them |
+| `ratingBreakdown` | `{ 1..5: Number }` | | Rating histogram |
+| `minPriceCents`, `maxPriceCents` | Number | | Calculated from variants. Used to filter and sort by price |
+| `maxDiscountPercent` | Number | | Calculated. Used for the "% off" badge |
+| `totalStock` | Number | | Calculated |
+| `inStock` | Boolean | | Calculated: `totalStock > 0` |
+| `salesCount` | Number | default 0 | Increased when an order is paid |
+| `source` | `{ provider: "dummyjson" \| "manual", externalId, importedAt }` | R | |
+| `createdBy`, `updatedBy` | ObjectId → users \| null | | |
+| `publishedAt` | Date \| null | | Set the first time `status` becomes `active`. Used by "New Arrivals" |
 
-**Variant** (subdocument, has its own `_id`, which is the `variantId` used everywhere)
+**Variant** (subdocument. Its `_id` is the `variantId` used in carts, checkouts, and orders)
 
 | Field | Type | Rules | Notes |
 |---|---|---|---|
-| `sku` | String | R, U (index on `variants.sku`) | |
-| `label` | String | R | "M", "256 GB", "Standard" |
-| `priceCents` | Number | R, ≥ 1 | Selling price |
+| `sku` | String | R, U across all products, uppercase | |
+| `label` | String | R, max 60 | "M", "256 GB", "Red", "Standard" |
+| `priceCents` | Number | R, integer ≥ 1 | Selling price |
 | `listPriceCents` | Number \| null | ≥ `priceCents` | Strikethrough "List:" price |
-| `stock` | Number | R, ≥ 0 | Decremented atomically when an order is created |
-| `isDefault` | Boolean | | Selected when `?v=` is missing |
+| `stock` | Number | R, integer ≥ 0 | |
+| `images` | [{ `url`, `publicId`, `alt` }] | optional | Variant-specific images (e.g. per color). Falls back to the product images |
+| `isDefault` | Boolean | Exactly one per product | |
+| `isActive` | Boolean | default `true` | A variant that has been ordered is deactivated instead of deleted |
 
-**Keeping the denormalized fields in sync:** `minPriceCents`, `maxPriceCents`, `maxDiscountPercent`, `totalStock`, and `inStock` are recalculated by a `pre('save')` hook. Stock changes made through `updateOne` (order creation and stock release) call `Product.syncStockFields(productId)` in the same transaction.
+**Model hooks and helpers**
 
-### 4.4 `reviews`
+- `pre('validate')`:
+  - generate the slug if it is empty
+  - set `department` from the category's parent
+  - make sure exactly one variant has `isDefault`
+  - set `publishedAt` the first time the product becomes active
+- `pre('save')`: recalculate `minPriceCents`, `maxPriceCents`, `maxDiscountPercent`, `totalStock`, and `inStock` from the active variants.
+- `Product.syncStockFields(productId, session)` recalculates the stock fields after atomic `$inc` stock updates (orders, cancellations).
+
+**Rules for managing products**
+
+- **Products are never deleted.** They are archived (`status: "archived"`), because orders and reviews refer to them. A hard delete is only allowed for a `draft` that has never appeared in an order.
+- **Variants that have been ordered are never removed.** They are deactivated (`isActive: false`). Price changes do not affect existing orders, because orders keep a snapshot.
+- When an image is removed from a product, it is also deleted from Cloudinary (`cloudinary.uploader.destroy(publicId)`) after the product has been saved.
+- Changing a product's stock in the admin pages sets the value directly (`stock = n`). Orders change stock with `$inc`. The two don't conflict because both run `syncStockFields` afterwards.
+
+### 5.4 `reviews`
 
 | Field | Type | Rules | Notes |
 |---|---|---|---|
 | `product` | ObjectId → products | R | |
 | `user` | ObjectId → users \| null | | `null` for seeded reviews |
-| `authorName` | String | R | Shown on the review |
+| `authorName` | String | R | |
 | `rating` | Number | R, integer 1–5 | |
-| `title` | String | | Generated for seeded reviews |
-| `body` | String | R | |
-| `verifiedPurchase` | Boolean | default `false` | "Verified Purchase" label |
-| `createdAt` | Date | | Seeded reviews get dates spread over 18 months |
+| `title` | String | max 120 | |
+| `body` | String | R, max 5,000 | |
+| `verifiedPurchase` | Boolean | default `false` | |
 
-Reviews are read-only in the MVP. The rating fields on `products` are calculated by the seed. When review writing is added later, it must also update those fields.
+Reviews are read-only for shoppers in the MVP. Admins can delete a review, which recalculates the product's rating fields.
 
-### 4.5 `carts`
+### 5.5 `carts`
 
 | Field | Type | Rules | Notes |
 |---|---|---|---|
-| `user` | ObjectId → users | R, U | One cart per user, created on first add |
+| `user` | ObjectId → users | R, U | |
 | `items` | [CartItem] | max 50 | |
 
-**CartItem** (subdocument, has its own `_id`, which is the `itemId` in cart routes)
+**CartItem** (has its own `_id`, which is the `itemId` in cart routes)
 
 | Field | Type | Rules | Notes |
 |---|---|---|---|
 | `product` | ObjectId → products | R | |
-| `variantId` | ObjectId | R | Must exist in `product.variants` |
-| `qty` | Number | R, integer 1–30 | Capped at variant stock when added or merged |
+| `variantId` | ObjectId | R | |
+| `qty` | Number | R, integer 1–30 | Capped at stock when the item is added or merged |
 | `savedForLater` | Boolean | default `false` | |
-| `addedPriceCents` | Number | R | Price when added, used to show "Price changed from $X" |
+| `addedPriceCents` | Number | R | Used for the "Price changed from $X" notice |
 | `addedAt` | Date | default now | |
 
-The pair (`product`, `variantId`) is unique within a cart. Adding the same variant again increases its `qty`. When the API returns a cart, it fills in the current title, image, label, price, and stock from `products`, and marks items whose variant is missing or out of stock.
+The pair (`product`, `variantId`) is unique within a cart. When the API returns a cart, it fills in each item's current details from `products` and flags items that are archived, inactive, or out of stock.
 
-### 4.6 `orders`
+### 5.6 `checkouts`
+
+A checkout is the **server-side record of one checkout attempt**. It is created when the user opens `/checkout` and holds the items, the selected address and delivery method, and the latest price quote. When the user clicks "Place your order", the checkout becomes an order. The checkout's id also acts as the idempotency key: one checkout can produce at most one order.
 
 | Field | Type | Rules | Notes |
 |---|---|---|---|
-| `orderNumber` | String | R, U | Amazon-style `112-1234567-1234567`. Used in URLs |
 | `user` | ObjectId → users | R | |
-| `checkoutId` | String (UUID) | R | Generated by the client per checkout attempt. Unique with `user`, so a double-clicked "Place order" can't create two orders |
-| `source` | String | enum `cart` \| `buy_now` | `cart` orders remove the purchased items from the cart once paid |
-| `items` | [OrderItem] | R, min 1 | Snapshot, see below |
-| `shippingAddress` | Address (no `_id`, no `isDefault`) | R | Snapshot |
-| `deliveryMethod` | String | enum `standard` \| `expedited` \| `nextday` | |
-| `estimatedDelivery` | Date | R | Set when the order is created |
-| `subtotalCents` | Number | R | |
-| `shippingCents` | Number | R | |
-| `taxCents` | Number | R | 8% of the subtotal |
-| `totalCents` | Number | R | |
-| `status` | String | enum `pending_payment` \| `paid` \| `shipped` \| `delivered` \| `cancelled` | default `pending_payment` |
-| `statusHistory` | [{ `status`, `at` }] | | Timeline on the order detail page |
-| `payment` | `{ stripePaymentIntentId, brand, last4 }` | | `brand` and `last4` are filled in by the webhook |
-| `reservationExpiresAt` | Date | | `createdAt + 30 min` while `pending_payment` |
-| `paidAt`, `shippedAt`, `deliveredAt`, `cancelledAt` | Date | | |
-| `cancelReason` | String | | `user_cancelled`, `payment_failed`, `reservation_expired` |
+| `source` | String | R, enum `cart` \| `buy_now` | |
+| `items` | [{ `product`, `variantId`, `qty` }] | R, 1–50 | Copied from the cart (unsaved-for-later items) or from the Buy Now item when the checkout starts. Later cart edits start a new checkout |
+| `addressId` | ObjectId \| null | | The selected `users.addresses._id` |
+| `shippingAddress` | Address snapshot \| null | | Copied when an address is selected |
+| `deliveryMethod` | String | enum `standard` \| `expedited` \| `nextday`, default `standard` | |
+| `quote` | `{ subtotalCents, shippingCents, taxCents, totalCents, estimatedDelivery, computedAt }` | | Recalculated on every change, and again when the order is placed |
+| `issues` | [{ `variantId`, `code`, `message` }] | | e.g. `out_of_stock`, `price_changed`, `unavailable`. Shown in "Review items" |
+| `status` | String | enum `open` \| `completed`, default `open` | |
+| `order` | ObjectId → orders \| null | | Set when the order is placed |
+| `expiresAt` | Date | R | `createdAt + 24 h`. Open checkouts are deleted by a TTL index after this time |
 
-**OrderItem** (subdocument, no own `_id` needed)
+Rules:
+
+- Starting a new checkout deletes the user's other `open` checkouts. Only one checkout is in progress at a time.
+- The client never sends prices. `quote` is always calculated on the server from the current variant prices.
+- **Place order** compares the newly calculated total with the `expectedTotalCents` the client displayed. If they differ, it returns `409 price_changed` with the new quote, and the user has to confirm again.
+
+### 5.7 `orders`
+
+| Field | Type | Rules | Notes |
+|---|---|---|---|
+| `orderNumber` | String | R, U | `112-1234567-1234567`. Used in URLs |
+| `user` | ObjectId → users | R | |
+| `checkout` | ObjectId → checkouts | R, U | One order per checkout, so a double click can't create two orders |
+| `source` | String | enum `cart` \| `buy_now` | |
+| `items` | [OrderItem] | R, min 1 | Snapshot |
+| `shippingAddress` | Address snapshot | R | |
+| `deliveryMethod` | String | enum | |
+| `estimatedDelivery` | Date | R | |
+| `subtotalCents`, `shippingCents`, `taxCents`, `totalCents` | Number | R | Copied from the final quote. `totalCents` must equal the PaymentIntent amount |
+| `currency` | String | default `"usd"` | |
+| `status` | String | enum `pending_payment` \| `paid` \| `shipped` \| `delivered` \| `cancelled` | Fulfillment status |
+| `paymentStatus` | String | enum `unpaid` \| `paid` \| `refunded` \| `partially_refunded` | Money status. Mirrors `payments.status` and the refund total |
+| `payment` | ObjectId → payments | | |
+| `paymentMethod` | `{ brand, last4 }` | | Copied from the payment for display ("Visa •••• 4242") |
+| `statusHistory` | [{ `status`, `at`, `note` }] | | Order detail timeline |
+| `reservationExpiresAt` | Date \| null | | `createdAt + 30 min` while `pending_payment`. Cleared when the order is paid |
+| `paidAt`, `shippedAt`, `deliveredAt`, `cancelledAt` | Date | | |
+| `cancelReason` | String | enum `user_cancelled` \| `reservation_expired` \| `admin_cancelled` | |
+
+**OrderItem** (no own `_id`)
 
 | Field | Type | Notes |
 |---|---|---|
 | `product` | ObjectId → products | For links and "Buy it again" |
 | `variantId` | ObjectId | |
-| `title` | String | Snapshot |
-| `variantLabel` | String | Snapshot ("256 GB") |
-| `image` | String | Snapshot (Cloudinary URL) |
+| `title`, `variantLabel`, `image`, `sku` | String | Snapshot |
 | `unitPriceCents` | Number | Snapshot |
 | `qty` | Number | |
+| `lineTotalCents` | Number | `unitPriceCents × qty` |
 
-**Status transitions** (enforced in `order.service.js`):
+**Order status transitions** (enforced in `order.service.js`; any other transition throws):
 
 ```
-pending_payment ──(webhook: succeeded)──► paid ──(dev script)──► shipped ──(dev script)──► delivered
-       │                                   │
-       ├──(webhook: failed)────────────────┤
-       ├──(30 min, unpaid)─────────────────┼──► cancelled   (stock released)
-       └──(user cancels)───────────────────┘
+pending_payment ──(payment_intent.succeeded)──► paid ──(dev script)──► shipped ──(dev script)──► delivered
+       │                                         │
+       ├──(30 min unpaid, PI cancelled)──────────┤
+       └──(user cancels)─────────────────────────┴──► cancelled      (stock released; paid → refund)
 ```
+
+A **declined card does not cancel the order.** The payment records the error, and the user can retry with the same PaymentIntent until the reservation expires.
+
+### 5.8 `payments`
+
+There is one document per order, matching **one Stripe PaymentIntent**. A retry after a declined card reuses the same PaymentIntent, so it doesn't create a new document.
+
+| Field | Type | Rules | Notes |
+|---|---|---|---|
+| `order` | ObjectId → orders | R, U | |
+| `user` | ObjectId → users | R | |
+| `provider` | String | default `"stripe"` | |
+| `stripePaymentIntentId` | String | R, U | `pi_...` |
+| `amountCents` | Number | R | Equal to `order.totalCents` |
+| `currency` | String | R, default `"usd"` | |
+| `status` | String | enum `requires_payment_method` \| `requires_action` \| `processing` \| `succeeded` \| `canceled` | Mirrors the PaymentIntent status. It is updated **only by webhooks** (or the expiry job), never by the client |
+| `failedAttempts` | Number | default 0 | Increased on `payment_intent.payment_failed` |
+| `lastError` | `{ code, declineCode, message, at }` \| null | | From `last_payment_error`. Shown to the user on retry |
+| `card` | `{ brand, last4, expMonth, expYear, country }` \| null | | From the successful charge's `payment_method_details.card` |
+| `stripeChargeId` | String \| null | | `latest_charge` |
+| `receiptUrl` | String \| null | | Stripe receipt link shown on the order page |
+| `amountRefundedCents` | Number | default 0 | |
+| `refunds` | [{ `stripeRefundId`, `amountCents`, `status`, `reason`, `createdAt` }] | | Embedded. A charge has only a few refunds |
+| `succeededAt`, `canceledAt` | Date \| null | | |
+| `lastEventId` | String | | The most recent `stripeEvents.eventId` applied, for debugging |
+
+**Never stored:** card numbers, CVC, or the PaymentIntent `client_secret`. Card details go straight from the browser to Stripe Elements. The `client_secret` is returned to the client when it is needed and fetched again from Stripe for a retry.
+
+### 5.9 `stripeEvents`
+
+This collection records every webhook event that Stripe sends, so that an event delivered twice is only processed once.
+
+| Field | Type | Rules | Notes |
+|---|---|---|---|
+| `eventId` | String | R, U | `evt_...` |
+| `type` | String | R | e.g. `payment_intent.succeeded` |
+| `objectId` | String | | `data.object.id` (`pi_...`, `ch_...`, `re_...`) |
+| `livemode` | Boolean | | Should always be `false` while the app runs in test mode |
+| `status` | String | enum `received` \| `processed` \| `ignored` \| `failed` | |
+| `error` | String \| null | | Error message if processing failed |
+| `attempts` | Number | default 1 | Increased each time Stripe redelivers the event |
+| `receivedAt` | Date | R | TTL: deleted after 90 days |
+| `processedAt` | Date \| null | | |
+
+**Handled event types**
+
+| Event | Action |
+|---|---|
+| `payment_intent.succeeded` | payment → `succeeded` + card details. Order → `paid`, `paymentStatus: paid`, stock reservation cleared, `salesCount` increased, cart items removed (if the order came from the cart) |
+| `payment_intent.payment_failed` | payment → `requires_payment_method`, `failedAttempts++`, `lastError`. **The order stays `pending_payment`** |
+| `payment_intent.processing` / `requires_action` | payment → matching status |
+| `payment_intent.canceled` | payment → `canceled`. If the order is still `pending_payment`, cancel it and release stock |
+| `charge.refunded` | Update `refunds[]` and `amountRefundedCents`. Order `paymentStatus` → `refunded` or `partially_refunded` |
+| anything else | Stored with `status: ignored` |
 
 ---
 
-## 5. Indexes
+## 6. Indexes
 
 | Collection | Index | Options | Used by |
 |---|---|---|---|
-| `users` | `{ email: 1 }` | unique | Sign in, sign up duplicate check |
-| `categories` | `{ slug: 1 }` | unique | `/c/:slug`, resolving the search `category` param |
-| `categories` | `{ parent: 1, sortOrder: 1 }` | | Building the tree |
+| `users` | `{ email: 1 }` | unique | Sign in, sign up |
+| `categories` | `{ slug: 1 }` | unique | `/c/:slug` |
+| `categories` | `{ parent: 1, isActive: 1, sortOrder: 1 }` | | Category tree, nav |
+| `categories` | `{ "source.provider": 1, "source.externalId": 1 }` | unique, partial (`externalId` is a string) | Import |
 | `products` | `{ slug: 1 }` | unique | Product page |
 | `products` | `{ "variants.sku": 1 }` | unique | SKU integrity |
-| `products` | `{ "source.provider": 1, "source.id": 1 }` | unique, sparse | Seed upserts |
-| `products` | Text: `{ title: 10, brand: 5, tags: 3, description: 1 }` | weights as shown, `name: "product_text"` | Search box (`$text`) |
-| `products` | `{ category: 1, isActive: 1, minPriceCents: 1 }` | | Category listing + price filter/sort |
-| `products` | `{ department: 1, isActive: 1, minPriceCents: 1 }` | | Department listing + price filter/sort |
-| `products` | `{ category: 1, ratingAvg: -1 }` | | "Top rated in X", rating sort |
-| `products` | `{ salesCount: -1 }` | | Best Sellers row, default relevance |
-| `products` | `{ createdAt: -1 }` | | New Arrivals row, newest sort |
-| `products` | `{ brand: 1 }` | | Brand filter + brand facet |
-| `reviews` | `{ product: 1, createdAt: -1 }` | | Paginated reviews on the product page |
-| `reviews` | `{ product: 1, user: 1 }` | unique, partial (`user` exists) | One review per user per product (future) |
-| `carts` | `{ user: 1 }` | unique | Load cart |
-| `orders` | `{ orderNumber: 1 }` | unique | Confirmation and detail pages |
+| `products` | `{ "source.provider": 1, "source.externalId": 1 }` | unique, partial (`externalId` is a string) | Import |
+| `products` | Text: `{ title: 10, brand: 5, tags: 3, description: 1 }` | `name: "product_text"` | Shopper search, admin search |
+| `products` | `{ category: 1, status: 1, minPriceCents: 1 }` | | Category listing + price |
+| `products` | `{ department: 1, status: 1, minPriceCents: 1 }` | | Department listing + price |
+| `products` | `{ category: 1, status: 1, ratingAvg: -1 }` | | Top rated, rating sort |
+| `products` | `{ status: 1, salesCount: -1 }` | | Best Sellers, relevance |
+| `products` | `{ status: 1, publishedAt: -1 }` | | New Arrivals, newest |
+| `products` | `{ brand: 1 }` | | Brand filter and facet |
+| `products` | `{ status: 1, updatedAt: -1 }` | | Admin product list |
+| `reviews` | `{ product: 1, createdAt: -1 }` | | Product reviews |
+| `reviews` | `{ product: 1, user: 1 }` | unique, partial (`user` exists) | One review per user (future) |
+| `carts` | `{ user: 1 }` | unique | |
+| `checkouts` | `{ user: 1, status: 1 }` | | Find the open checkout |
+| `checkouts` | `{ expiresAt: 1 }` | TTL `expireAfterSeconds: 0`, partial `{ status: "open" }` | Remove abandoned checkouts |
+| `orders` | `{ orderNumber: 1 }` | unique | |
+| `orders` | `{ checkout: 1 }` | unique | One order per checkout |
 | `orders` | `{ user: 1, createdAt: -1 }` | | Order history |
-| `orders` | `{ user: 1, checkoutId: 1 }` | unique | Prevents duplicate orders from double clicks |
-| `orders` | `{ "payment.stripePaymentIntentId": 1 }` | unique, sparse | Webhook lookup |
-| `orders` | `{ status: 1, reservationExpiresAt: 1 }` | partial (`status: "pending_payment"`) | Expiry job |
+| `orders` | `{ status: 1, reservationExpiresAt: 1 }` | partial `{ status: "pending_payment" }` | Expiry job |
+| `payments` | `{ stripePaymentIntentId: 1 }` | unique | Webhook lookup |
+| `payments` | `{ order: 1 }` | unique | |
+| `payments` | `{ user: 1, createdAt: -1 }` | | |
+| `stripeEvents` | `{ eventId: 1 }` | unique | Process each event only once |
+| `stripeEvents` | `{ receivedAt: 1 }` | TTL 90 days | Cleanup |
+| `stripeEvents` | `{ status: 1, receivedAt: -1 }` | partial `{ status: "failed" }` | Find failed events |
 
-Indexes are declared in the schemas (`schema.index(...)`) and created with `Model.syncIndexes()` during seeding. `autoIndex` is turned off in production.
-
-A note on search: MongoDB's `$text` is enough for 184 products, but it has no typo tolerance or autocomplete. If those are needed later, the upgrade is **Atlas Search**, which needs no schema changes.
+Indexes are declared in the schemas and created with `Model.syncIndexes()` during seeding. `autoIndex` is turned off in production. For search, `$text` is enough for a catalog of a few hundred products. Atlas Search is the upgrade path if typo tolerance or autocomplete is needed later.
 
 ---
 
-## 6. How the Data Supports the Main Flows
+## 7. How the Data Supports the Main Flows
 
-### 6.1 Homepage
+### 7.1 Homepage
+
+Every shopper query includes `{ status: "active" }` and excludes inactive categories.
 
 | Section | Query |
 |---|---|
-| Header, "All" sidebar, category tiles | `categories.find().sort({ level: 1, sortOrder: 1 })`, loaded once and cached on the client |
-| Best Sellers row | `products.find({ isActive: true }).sort({ salesCount: -1 }).limit(12)` |
-| New Arrivals row | `…sort({ createdAt: -1 }).limit(12)` |
-| Top Rated in {department} | `products.find({ department, isActive: true }).sort({ ratingAvg: -1 }).limit(12)` for 2–3 departments |
-| Deals row | `products.find({ maxDiscountPercent: { $gte: 10 } }).sort({ maxDiscountPercent: -1 })` |
+| Header, "All" sidebar, category tiles | `categories.find({ isActive: true }).sort({ level: 1, sortOrder: 1 })`, cached on the client |
+| Best Sellers | `products.find({ status: "active" }).sort({ salesCount: -1 }).limit(12)` |
+| New Arrivals | `…sort({ publishedAt: -1 }).limit(12)` |
+| Top Rated in {dept} | `products.find({ department, status: "active" }).sort({ ratingAvg: -1 }).limit(12)` |
+| Deals | `products.find({ status: "active", maxDiscountPercent: { $gte: 10 } }).sort({ maxDiscountPercent: -1 })` |
 
-All rows come from a single endpoint, `GET /api/products/home`, and only return the card fields (`title, slug, images.0, minPriceCents, maxDiscountPercent, ratingAvg, ratingCount`).
-
-### 6.2 Search / Category listing
-
-`GET /api/products` converts the query parameters into a single `find()`:
+### 7.2 Search / Category listing
 
 | Param | Filter |
 |---|---|
 | `q` | `{ $text: { $search: q } }` |
-| `category` (slug) | Resolve the slug. A department filters on `{ department: id }`, and a category filters on `{ category: id }` |
-| `minPrice`, `maxPrice` (dollars) | `{ minPriceCents: { $gte, $lte } }` |
-| `rating` | `{ ratingAvg: { $gte: rating } }` |
-| `brand` (comma list) | `{ brand: { $in: [...] } }` |
+| `category` (slug) | Department → `{ department: id }`. Category → `{ category: id }` |
+| `minPrice`, `maxPrice` | `{ minPriceCents: { $gte, $lte } }` |
+| `rating` | `{ ratingAvg: { $gte } }` |
+| `brand` | `{ brand: { $in } }` |
 | `inStock=true` | `{ inStock: true }` |
-| always | `{ isActive: true }` |
+| always | `{ status: "active" }` |
 
 | `sort` | Mongo sort |
 |---|---|
-| `relevance` (default) | With `q`: `{ score: { $meta: "textScore" }, salesCount: -1 }`. Without `q`: `{ salesCount: -1 }` |
-| `price_asc` / `price_desc` | `{ minPriceCents: 1 \| -1 }` |
+| `relevance` | With `q`: `{ score: { $meta: "textScore" }, salesCount: -1 }`. Without `q`: `{ salesCount: -1 }` |
+| `price_asc` / `price_desc` | `{ minPriceCents: ±1 }` |
 | `rating` | `{ ratingAvg: -1, ratingCount: -1 }` |
-| `newest` | `{ createdAt: -1 }` |
+| `newest` | `{ publishedAt: -1 }` |
 
-Pagination uses `skip`/`limit` (24 per page), and the total comes from `countDocuments`. The brand facet runs `distinct("brand", filter)`, where `filter` is the query without the brand condition, so the user can still select other brands. Two pieces of data support the filter sidebar: the category tree it gets from `categories`, and the brands this query returns.
+Pagination uses `skip`/`limit` (24 per page) and `countDocuments`. The brand facet runs `distinct("brand", filterWithoutBrand)`.
 
-### 6.3 Product details
+### 7.3 Product details
 
-- `products.findOne({ slug, isActive: true })` returns everything on the page, including all variants, in one read.
-- The selected variant comes from `?v=variantId` if present, otherwise the `isDefault` variant.
+- `products.findOne({ slug, status: "active" })` returns the whole page in one read. Only active variants are shown.
+- The selected variant is `?v=` if it is valid, otherwise the `isDefault` variant.
 - The stock message comes from `variant.stock`: 0 shows "Currently unavailable", 1–5 shows "Only N left in stock", and higher shows "In Stock".
-- Reviews come from a separate paginated call: `reviews.find({ product }).sort({ createdAt: -1 })`. The histogram uses `product.ratingBreakdown`.
-- "More from {category}": `products.find({ category, _id: { $ne } }).sort({ salesCount: -1 }).limit(8)`.
+- Reviews come from a separate paginated query. The histogram uses `ratingBreakdown`. Related products: same `category`, sorted by `salesCount`.
 
-### 6.4 Cart
+### 7.4 Cart
 
-- **Guest:** items `{ productId, variantId, qty }` are kept in localStorage. To display them, the client calls `POST /api/cart/preview`, which fills in current details for each item without saving anything.
-- **Signed in:** `carts.findOne({ user })`, then one `products.find({ _id: { $in: productIds } })` to fill in titles, prices, and stock.
-- **Add:** `findOneAndUpdate` with upsert. If the variant is already in the cart, its `qty` is increased (capped at stock and 30). Otherwise a new item is pushed.
-- **Merge on sign in:** for each guest item, add it to the account cart with the add rule above.
-- The subtotal shown in the cart covers only items where `savedForLater: false`, using current prices.
+- **Guest:** items are kept in localStorage. `POST /api/cart/preview` fills in their details without saving anything.
+- **Signed in:** `carts.findOne({ user })` + one `products.find({ _id: { $in } })` to fill in details.
+- **Add:** upsert. If the variant is already in the cart its `qty` is increased, capped at stock and 30.
+- **Merge on sign in:** each guest item is added with the same rule.
 
-### 6.5 Checkout and payment
+### 7.5 Checkout and Stripe payment
 
-1. **Quote** (`POST /api/checkout/quote`): load the items (from the cart, or the single Buy Now item) and the current variant prices, then return subtotal, shipping, tax, and total from `pricing.service`. Nothing is written.
-2. **Place order** (`POST /api/orders`): this runs in a **single transaction**:
-   - For each item: `products.updateOne({ _id, "variants._id": variantId, "variants.stock": { $gte: qty } }, { $inc: { "variants.$.stock": -qty } })`. If `modifiedCount === 0`, the item is out of stock: abort and return `409` with the affected items.
-   - Recalculate the denormalized stock fields of each affected product.
-   - Insert the order with snapshots, `status: pending_payment`, and `reservationExpiresAt: now + 30 min`.
-   - After the commit, create the Stripe PaymentIntent (`metadata.orderNumber`) and save its id on the order.
-3. **Webhook** `payment_intent.succeeded`: find the order by `payment.stripePaymentIntentId`. Only if its status is still `pending_payment`, set it to `paid` with `paidAt` and the card brand and last 4. Then increment `salesCount` for each product and, for `source: cart`, remove the purchased items from the cart. The status check makes webhook retries harmless.
-4. **Webhook** `payment_intent.payment_failed`, or the expiry job (every minute, `{ status: "pending_payment", reservationExpiresAt: { $lt: now } }`): in a transaction, put the stock back (`$inc` +qty), set the order to `cancelled`, and record `cancelReason`.
+```
+Client                          API                                   MongoDB                     Stripe
+  │ open /checkout                │                                      │                           │
+  │──POST /checkout {source}─────►│ delete user's other open checkouts   │                           │
+  │                               │ copy items, quote ──────────────────►│ checkouts (open)          │
+  │◄────── checkout + quote ──────│                                      │                           │
+  │──PATCH /checkout/:id ────────►│ address / delivery → re-quote ──────►│ checkouts                 │
+  │  {addressId, deliveryMethod}  │                                      │                           │
+  │──POST /checkout/:id/place ───►│ ① recalculate quote; total ≠ expectedTotalCents → 409 price_changed
+  │  {expectedTotalCents}         │ ② TRANSACTION ──────────────────────►│ products: $inc stock -qty │
+  │                               │    (stock check, conditional $inc)   │ orders (pending_payment)  │
+  │                               │                                      │ checkouts (completed)     │
+  │                               │ ③ create PaymentIntent ─────────────────────────────────────────►│
+  │                               │    idempotencyKey = "pi-" + orderId, amount = totalCents,        │
+  │                               │    metadata { orderId, orderNumber, userId }                     │
+  │                               │ ④ insert payment ───────────────────►│ payments                  │
+  │◄── { orderNumber, clientSecret }                                     │                           │
+  │──stripe.confirmCardPayment(clientSecret, card) ─────────────────────────────────────────────────►│
+  │                               │◄──────────── POST /webhooks/stripe (payment_intent.*) ───────────│
+  │                               │ ⑤ verify signature, insert stripeEvents (unique eventId)         │
+  │                               │ ⑥ apply event in a TRANSACTION ─────►│ payments, orders,         │
+  │                               │                                      │ products.salesCount, carts│
+  │──GET /orders/:orderNumber (poll until paid)─►│                       │                           │
+```
 
-### 6.6 Order confirmation
+**Step details**
 
-`orders.findOne({ orderNumber, user: req.user._id })`. Filtering by `user` means one user can never read another user's order. The page polls this endpoint every 2 s, for up to 20 s, until `status` changes from `pending_payment` to `paid`.
+1. **Recalculating the price.** The final quote is calculated from current prices. If it differs from what the user saw, nothing is written and the user must confirm the new total.
+2. **Order transaction.** For each item:
+   `products.updateOne({ _id, variants: { $elemMatch: { _id: variantId, isActive: true, stock: { $gte: qty } } }, status: "active" }, { $inc: { "variants.$.stock": -qty } })`.
+   If `modifiedCount === 0`, the transaction is aborted and the API returns `409 out_of_stock` with the affected items. Then `syncStockFields`, insert the order (`checkout` is unique, so a repeated request returns the existing order), and set the checkout to `completed`.
+3. **PaymentIntent.** It is created after the commit, using a Stripe idempotency key so a retried request can't create a second PaymentIntent. If Stripe fails, the order stays `pending_payment` with no payment, and the client can call `POST /orders/:orderNumber/payment-intent` to create the PaymentIntent again (same idempotency key).
+4. **Payment document.** Inserted with `status: requires_payment_method`.
+5. **Webhook receipt.** Steps, in order:
+   1. `stripe.webhooks.constructEvent(rawBody, signature, secret)`. If it fails, return 400.
+   2. Insert into `stripeEvents`. If the `eventId` already exists and was `processed`, return 200 without doing anything.
+   3. Process the event, then mark it `processed`, or `failed` and return 500 so Stripe retries.
+6. **Applying `succeeded`.** Checks before marking the order paid:
+   - `amount_received === order.totalCents` and the currency matches
+   - the order is still `pending_payment`
 
-### 6.7 Account and orders
+   If the order was already cancelled (the payment arrived just after the reservation expired), it is **refunded automatically** and logged.
 
-- Profile and addresses: `users.findById(req.user._id)`. Addresses are edited with positional updates on `addresses._id`.
-- Order history: `orders.find({ user, createdAt: { $gte: rangeStart } }).sort({ createdAt: -1 })`, paginated, using the `{ user, createdAt }` index.
-- Cancel: allowed only from `pending_payment` or `paid`. It releases stock in a transaction, and a `paid` order also gets a Stripe refund (`stripe.refunds.create`).
-- Buy it again: adds `items[].product` / `variantId` to the cart if the variant still exists and is in stock.
+**Retrying a declined card:** `payment_failed` updates `lastError` on the payment. The client shows the message and calls `confirmCardPayment` again with the **same** `clientSecret`, so the order and the reserved stock stay the same.
 
-### 6.8 Authentication
+**Reservation expiry** (job, every 60 s):
+1. Find `orders` with `{ status: "pending_payment", reservationExpiresAt: { $lt: now } }`.
+2. Call `stripe.paymentIntents.cancel(pi)`. If the PaymentIntent is already `succeeded` or `processing`, skip the order and let the webhook settle it.
+3. In a transaction:
+   - release the stock (`$inc +qty`)
+   - order → `cancelled` (`reservation_expired`)
+   - payment → `canceled`
 
-- Sign up: check `users.findOne({ email })`, then `users.create` with the bcrypt hash.
-- Sign in: `users.findOne({ email }).select("+passwordHash")`, then `bcrypt.compare`.
-- The JWT payload is just `{ sub: userId }`. The `protect` middleware loads the user without `passwordHash` (one indexed `_id` read per request).
+**User cancel** (`pending_payment` or `paid`):
+- Release the stock in a transaction and set the order to `cancelled`.
+- If it was paid, call `stripe.refunds.create({ payment_intent })`. The `charge.refunded` webhook then updates the payment and `paymentStatus`.
+
+### 7.6 Order confirmation
+
+`orders.findOne({ orderNumber, user })`. The page polls every 2 s, for up to 20 s, until the order is `paid`. If `payment.lastError` is set, it shows the error and offers a retry.
+
+### 7.7 Account and orders
+
+- Order history: `orders.find({ user, createdAt: { $gte } }).sort({ createdAt: -1 })`.
+- The order detail page joins `payments` for the card, receipt URL, and refunds.
+- Buy it again: adds the items' `product`/`variantId` to the cart if the product is active and the variant is active and in stock.
+
+### 7.8 Admin catalog management
+
+All admin routes require `role: "admin"`. Every write sets `updatedBy`, and create sets `createdBy` too.
+
+| Action | Data operation |
+|---|---|
+| List products | `products.find(filter)` by `status`, `category`, text `q`; sort `updatedAt: -1`; paginated. Shows stock and price ranges |
+| Create product | Insert with `status: "draft"`, `source.provider: "manual"`. Hooks generate the slug and set `department` and the calculated fields |
+| Edit product / variants | `findById` → apply changes → `save()`, which runs the validation and calculation hooks. Variants that have been ordered can only be deactivated |
+| Publish / archive | `status` → `active` / `archived`. Publishing needs at least 1 image and at least 1 active variant with price > 0 |
+| Upload image | `POST /api/admin/uploads` → Cloudinary `amazon-clone/products/<productId>/` → returns `{ url, publicId }`, which the client adds to `images` |
+| Create / edit category | Validate the slug is unique and `parent` is a department. Moving a category updates its products' `department` in a transaction |
+| Delete category | Only if no products and no child categories reference it |
+| Delete review | Remove it, then recalculate `ratingAvg`, `ratingCount`, and `ratingBreakdown` |
+
+### 7.9 Authentication
+
+- Sign up: check the email is unique, then create the user with the bcrypt hash.
+- Sign in: `findOne({ email }).select("+passwordHash")`, then `bcrypt.compare`.
+- The JWT contains only `{ sub: userId }`. `protect` loads the user on every request, so a role change or deleted account takes effect immediately.
 
 ---
 
-## 7. Seed Output Summary
+## 8. Seed Output Summary
 
 | Collection | Documents | Source |
 |---|---|---|
-| `categories` | 28 (6 + 22) | `categoryMap.js` |
-| `products` | 184 | DummyJSON, transformed |
-| variants (embedded) | ~310 | Generated (section 2.5) |
+| `categories` | 28 (6 + 22) | `categoryMap.js` + DummyJSON categories |
+| `products` | 184, all `active` | DummyJSON snapshot, transformed |
+| variants (embedded) | ~310 | Generated (§3.6) |
 | `reviews` | ~1,600 | 552 from DummyJSON + generated |
-| `users` | 2 | `demo@example.com`, `admin@example.com` |
-| `orders` | 4 | Demo user, one in each of `paid`, `shipped`, `delivered`, `cancelled` |
-| Cloudinary images | 424 | Uploaded from `cdn.dummyjson.com` to `amazon-clone/products/<slug>/<n>` |
+| `users` | 2 | `demo@example.com` (user), `admin@example.com` (admin) |
+| `orders` + `payments` | 4 + 4 | Demo user, one each in `paid`, `shipped`, `delivered`, `cancelled`. Payments are seeded with fake `pi_seed_…` ids |
+| `checkouts`, `carts`, `stripeEvents` | 0 | Created at runtime |
+| Cloudinary images | 424 | Uploaded to `amazon-clone/products/<slug>/<n>` |

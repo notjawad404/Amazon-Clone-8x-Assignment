@@ -2,7 +2,7 @@
 
 This document defines how the code is organized: the frontend (`client/`) and the backend (`server/`) are covered separately. It describes what lives in each folder, the rules for where new code goes, and how a request moves through both sides.
 
-Related docs: [01-initial-plan.md](01-initial-plan.md), [03-database-schema.md](03-database-schema.md), [04-development-phases.md](04-development-phases.md).
+Related docs: [01-initial-plan.md](01-initial-plan.md), [03-database-schema.md](03-database-schema.md), [04-development-phases.md](04-development-phases.md), [05-coding-standards.md](05-coding-standards.md).
 
 ---
 
@@ -63,12 +63,16 @@ client/
     │   │   ├── cartApi.js         # getCart, addItem, updateItem, removeItem, mergeCart, previewCart
     │   │   └── guestCartSlice.js  # { items: [{ productId, variantId, qty, savedForLater }] }
     │   ├── checkout/
-    │   │   ├── checkoutApi.js     # getQuote, createOrder
-    │   │   └── checkoutSlice.js   # { checkoutId, addressId, deliveryMethod, buyNowItem }
+    │   │   ├── checkoutApi.js     # startCheckout, getCheckout, updateCheckout, placeOrder, retryPaymentIntent
+    │   │   └── checkoutSlice.js   # { checkoutId, buyNowItem }
     │   ├── orders/
     │   │   └── ordersApi.js       # getOrders, getOrder, cancelOrder, buyAgain
     │   ├── account/
     │   │   └── addressesApi.js    # list/create/update/delete/setDefault
+    │   ├── admin/
+    │   │   ├── adminProductsApi.js    # list, get, create, update, setStatus, delete draft
+    │   │   ├── adminCategoriesApi.js  # list, create, update, delete
+    │   │   └── adminUploadsApi.js     # uploadImage
     │   └── ui/
     │       └── uiSlice.js         # { sidebarOpen, toasts[] }
     │
@@ -85,7 +89,11 @@ client/
     │   ├── AddressesPage.jsx
     │   ├── OrdersPage.jsx
     │   ├── OrderDetailPage.jsx
-    │   └── NotFoundPage.jsx
+    │   ├── NotFoundPage.jsx
+    │   └── admin/
+    │       ├── AdminProductsPage.jsx      # Table: search, status/category filters, pagination
+    │       ├── AdminProductEditPage.jsx   # Create and edit (same form)
+    │       └── AdminCategoriesPage.jsx    # Department/category tree with inline edit
     │
     ├── components/
     │   ├── layout/
@@ -143,6 +151,13 @@ client/
     │   │   ├── OrderCard.jsx
     │   │   ├── OrderTimeline.jsx
     │   │   └── StatusBadge.jsx
+    │   ├── admin/
+    │   │   ├── AdminLayout.jsx    # Side nav (Products, Categories) + content area
+    │   │   ├── ProductForm.jsx    # Details, category, bullets, specs, status
+    │   │   ├── VariantEditor.jsx  # Rows: label, SKU, price, list price, stock, default, active
+    │   │   ├── ImageManager.jsx   # Upload, reorder, alt text, remove
+    │   │   ├── CategoryForm.jsx
+    │   │   └── ProductStatusPill.jsx
     │   └── ui/                    # Generic, domain-free building blocks
     │       ├── Button.jsx         # variants: yellow, orange, outline, link
     │       ├── Input.jsx
@@ -159,7 +174,8 @@ client/
     │
     ├── routes/
     │   ├── ProtectedRoute.jsx     # Not signed in → /signin?redirect=<current>
-    │   └── GuestOnlyRoute.jsx     # Already signed in → away from /signin, /signup
+    │   ├── GuestOnlyRoute.jsx     # Already signed in → away from /signin, /signup
+    │   └── AdminRoute.jsx         # Not admin → 404 page (doesn't reveal that admin pages exist)
     │
     ├── hooks/
     │   ├── useAuth.js             # { user, isAuthenticated, isLoading }
@@ -208,9 +224,12 @@ client/
 | `/account/addresses` | AddressesPage | Protected | Full |
 | `/orders` | OrdersPage | Protected | Full |
 | `/orders/:orderNumber` | OrderDetailPage | Protected | Full |
+| `/admin/products` | AdminProductsPage | Admin | Admin |
+| `/admin/products/new`, `/admin/products/:id` | AdminProductEditPage | Admin | Admin |
+| `/admin/categories` | AdminCategoriesPage | Admin | Admin |
 | `*` | NotFoundPage | Public | Full |
 
-Pages are lazy loaded (`React.lazy`), apart from Home and Search.
+Pages are lazy loaded (`React.lazy`), apart from Home and Search. The admin pages are in their own chunk, so shoppers never download them.
 
 ### 2.4 Redux store shape
 
@@ -219,12 +238,14 @@ Pages are lazy loaded (`React.lazy`), apart from Home and Search.
   api: { /* RTK Query cache */ },
   auth:      { user: { _id, name, email, role } | null, status: 'idle' | 'authenticated' | 'guest' },
   guestCart: { items: [{ productId, variantId, qty, savedForLater }] },   // persisted to localStorage
-  checkout:  { checkoutId, addressId, deliveryMethod: 'standard', buyNowItem: { productId, variantId, qty } | null },
+  checkout:  { checkoutId: string | null, buyNowItem: { productId, variantId, qty } | null },
   ui:        { sidebarOpen: false, toasts: [] }
 }
 ```
 
-- **Tag types:** `Me`, `Cart`, `Orders`, `Order`, `Addresses`. Catalog data (products, categories) is never invalidated during a session.
+The selected address, delivery method, and price quote are stored on the server in the `checkouts` collection, not in Redux. That way a page reload keeps the checkout as it was, and prices can only come from the server.
+
+- **Tag types:** `Me`, `Cart`, `Checkout`, `Orders`, `Order`, `Addresses`, `AdminProducts`, `AdminCategories`. Shopper catalog data is never invalidated during a session. Admin changes invalidate the admin tags, and shopper pages see the changes the next time they load.
 - **Listener middleware:**
   - When `signin` or `signup` is fulfilled: if `guestCart.items` is not empty, call `mergeCart`, clear `guestCart`, and invalidate `Cart`.
   - When `signout` is fulfilled: run `api.util.resetApiState()` and reset the `checkout` slice.
@@ -269,7 +290,10 @@ server/
     │   ├── Product.js             # + variantSchema, pre('save') denormalization, syncStockFields()
     │   ├── Review.js
     │   ├── Cart.js                # + cartItemSchema
-    │   └── Order.js               # + orderItemSchema, status transition helper
+    │   ├── Checkout.js            # TTL on expiresAt for open checkouts
+    │   ├── Order.js               # + orderItemSchema, status transition helper
+    │   ├── Payment.js             # + refundSchema
+    │   └── StripeEvent.js         # TTL 90 days
     │
     ├── routes/
     │   ├── index.js               # Mounts every router under /api
@@ -281,8 +305,13 @@ server/
     │   ├── checkout.routes.js
     │   ├── address.routes.js      # /users/me/addresses
     │   ├── order.routes.js
-    │   ├── upload.routes.js
-    │   └── webhook.routes.js      # Mounted before express.json()
+    │   ├── webhook.routes.js      # Mounted before express.json()
+    │   └── admin/
+    │       ├── index.js           # protect + requireAdmin for everything under /admin
+    │       ├── product.routes.js
+    │       ├── category.routes.js
+    │       ├── review.routes.js
+    │       └── upload.routes.js
     │
     ├── controllers/               # Thin: read req, call service, send res
     │   ├── auth.controller.js
@@ -292,19 +321,27 @@ server/
     │   ├── checkout.controller.js
     │   ├── address.controller.js
     │   ├── order.controller.js
-    │   ├── upload.controller.js
-    │   └── webhook.controller.js
+    │   ├── webhook.controller.js
+    │   └── admin/
+    │       ├── product.controller.js
+    │       ├── category.controller.js
+    │       ├── review.controller.js
+    │       └── upload.controller.js
     │
     ├── services/                  # Business logic. No req/res
     │   ├── auth.service.js        # hash, verify, issue token
-    │   ├── catalog.service.js     # home rows, product by slug, reviews, related
+    │   ├── catalog.service.js     # home rows, product by slug, reviews, related (active only)
     │   ├── search.service.js      # params → { filter, sort, skip, limit }, facets
     │   ├── cart.service.js        # add/update/remove/merge/hydrate/preview
     │   ├── pricing.service.js     # subtotal, shipping, tax, total, delivery dates
-    │   ├── order.service.js       # create (txn), markPaid, cancel, releaseStock, expire
-    │   ├── payment.service.js     # Stripe PaymentIntent, refund, webhook event parsing
+    │   ├── checkout.service.js    # start, update, quote, place (txn → order + payment)
+    │   ├── order.service.js       # status transitions, cancel, releaseStock, expireReservations
+    │   ├── payment.service.js     # Stripe PaymentIntent create/cancel, refunds
+    │   ├── stripeWebhook.service.js # verify, record in stripeEvents, dispatch by event type
     │   ├── address.service.js
-    │   └── upload.service.js      # Buffer → Cloudinary upload stream
+    │   ├── image.service.js       # Buffer → Cloudinary upload stream, destroy by publicId
+    │   ├── adminProduct.service.js  # CRUD, publish/archive, variant rules, image cleanup
+    │   └── adminCategory.service.js # CRUD, reparent (txn), delete guards
     │
     ├── middleware/
     │   ├── protect.js             # JWT cookie → req.user, else 401
@@ -322,7 +359,10 @@ server/
     │   ├── cart.schema.js
     │   ├── checkout.schema.js
     │   ├── address.schema.js
-    │   └── order.schema.js
+    │   ├── order.schema.js
+    │   └── admin/
+    │       ├── product.schema.js
+    │       └── category.schema.js
     │
     ├── utils/
     │   ├── asyncHandler.js
@@ -335,8 +375,8 @@ server/
     ├── jobs/
     │   └── expirePendingOrders.js # setInterval 60s → order.service.expireReservations()
     │
-    ├── seed/
-    │   ├── seed.js                # npm run seed / seed -- --destroy
+    ├── seed/                      # Initial import only. The app never reads these files at runtime
+    │   ├── seed.js                # npm run seed (refuses if the catalog isn't empty) / -- --reset (dev only)
     │   ├── fetchSource.js         # npm run seed:fetch → data/dummyjson-*.json
     │   ├── categoryMap.js         # 6 departments ← 22 DummyJSON slugs
     │   ├── transformProduct.js    # DummyJSON product → Product doc
@@ -345,6 +385,7 @@ server/
     │   ├── uploadImages.js        # Cloudinary upload with deterministic public_id
     │   ├── seedUsersAndOrders.js  # Demo + admin users, demo order history
     │   ├── advanceOrders.js       # npm run orders:advance (paid → shipped → delivered)
+    │   ├── resyncCatalog.js       # npm run catalog:resync
     │   └── data/
     │       ├── dummyjson-products.json
     │       └── dummyjson-categories.json
@@ -356,7 +397,10 @@ server/
         ├── search.test.js
         ├── cart.test.js
         ├── pricing.test.js
-        └── order.test.js
+        ├── checkout.test.js
+        ├── webhook.test.js        # Signed test payloads via stripe.webhooks.generateTestHeaderString
+        ├── order.test.js
+        └── admin.test.js
 ```
 
 ### 3.2 Layers
@@ -400,11 +444,16 @@ app.use(errorHandler)
 | `category` | `GET /categories` | – |
 | `product` | `GET /products`, `GET /products/home`, `GET /products/:slug`, `GET /products/:slug/reviews`, `GET /products/:slug/related` | – |
 | `cart` | `GET /cart`, `POST /cart/items`, `PATCH /cart/items/:itemId`, `DELETE /cart/items/:itemId`, `POST /cart/merge`, `POST /cart/preview` | protect (except `preview`) |
-| `checkout` | `POST /checkout/quote` | protect |
+| `checkout` | `POST /checkout` (start: `{ source, item? }`), `GET /checkout/:id`, `PATCH /checkout/:id` (`{ addressId?, deliveryMethod? }`), `POST /checkout/:id/place` (`{ expectedTotalCents }` → `{ orderNumber, clientSecret }`) | protect, owner only |
 | `address` | `GET/POST /users/me/addresses`, `PATCH/DELETE /users/me/addresses/:id`, `POST /users/me/addresses/:id/default` | protect |
-| `order` | `POST /orders`, `GET /orders`, `GET /orders/:orderNumber`, `POST /orders/:orderNumber/cancel`, `POST /orders/:orderNumber/buy-again` | protect |
-| `upload` | `POST /uploads` | protect + requireAdmin |
+| `order` | `GET /orders`, `GET /orders/:orderNumber`, `POST /orders/:orderNumber/payment-intent` (get or create the `clientSecret` for a retry), `POST /orders/:orderNumber/cancel`, `POST /orders/:orderNumber/buy-again` | protect, owner only |
 | `webhook` | `POST /webhooks/stripe` | Stripe signature |
+| `admin/product` | `GET /admin/products`, `GET /admin/products/:id`, `POST /admin/products`, `PATCH /admin/products/:id`, `POST /admin/products/:id/status` (`{ status }`), `DELETE /admin/products/:id` (drafts never ordered only) | protect + requireAdmin |
+| `admin/category` | `GET /admin/categories`, `POST /admin/categories`, `PATCH /admin/categories/:id`, `DELETE /admin/categories/:id` | protect + requireAdmin |
+| `admin/review` | `DELETE /admin/reviews/:id` | protect + requireAdmin |
+| `admin/upload` | `POST /admin/uploads` (multipart `image`) → `{ url, publicId }`, `DELETE /admin/uploads` (`{ publicId }`) | protect + requireAdmin |
+
+The admin product endpoints return every product with every field, including drafts and archived products. The shopper endpoints (`/products`) return only active products, active variants, and the fields shoppers need.
 
 ### 3.5 Response conventions
 
@@ -426,9 +475,10 @@ app.use(errorHandler)
 | `dev` | `nodemon src/server.js` |
 | `start` | `node src/server.js` |
 | `seed` | `node src/seed/seed.js` |
-| `seed:destroy` | `node src/seed/seed.js --destroy` |
+| `seed:reset` | `node src/seed/seed.js --reset` (development only. Wipes all data, including admin edits) |
 | `seed:fetch` | `node src/seed/fetchSource.js` |
 | `orders:advance` | `node src/seed/advanceOrders.js` |
+| `catalog:resync` | `node src/seed/resyncCatalog.js` (recalculates derived product fields after direct DB edits) |
 | `test` | `vitest run` |
 
 Test dependencies: `vitest`, `supertest`, `mongodb-memory-server`.

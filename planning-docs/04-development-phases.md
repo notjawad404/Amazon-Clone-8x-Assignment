@@ -2,7 +2,7 @@
 
 This document splits the whole project into phases, in build order. Each phase lists its backend and frontend work, what it delivers, and the checks that must pass before the next phase starts.
 
-Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md](02-project-structure.md), [03-database-schema.md](03-database-schema.md).
+Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md](02-project-structure.md), [03-database-schema.md](03-database-schema.md), [05-coding-standards.md](05-coding-standards.md).
 
 ---
 
@@ -11,7 +11,7 @@ Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md
 | Phase | Name | Main output |
 |---|---|---|
 | 0 | Project setup | Client + server scaffolded, both run with `npm run dev`, layout shell |
-| 1 | Database schema & seed data | All Mongoose models, indexes, 184 products in MongoDB, images on Cloudinary |
+| 1 | Database schema & initial import | All Mongoose models and indexes. A one-time import of 184 products from the DummyJSON snapshot into MongoDB, with images on Cloudinary |
 | 2 | Authentication | Sign up, sign in, sign out, session restore, protected routes |
 | 3 | Homepage | Hero, category cards, product rows from real data |
 | 4 | Navigation | Full header, sub-nav, account menu, cart badge, footer |
@@ -19,19 +19,23 @@ Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md
 | 6 | Category & product listing pages | `/s` and `/c/:slug` with filter sidebar, sort, pagination |
 | 7 | Product detail page | Gallery, variants, buy box, reviews, related products |
 | 8 | Cart | Guest + server cart, merge on sign in, save for later |
-| 9 | Checkout & payment | Addresses, delivery, Stripe payment, order creation, Buy Now |
-| 10 | Order confirmation | Confirmation page with payment status polling |
-| 11 | Account & orders | Account hub, addresses, order history and detail, cancel, buy again |
-| 12 | Polish & testing | Responsive layout, all states, accessibility, end-to-end test |
-| 13 | Deployment | Production build on a single origin, live Stripe webhook |
+| 9 | Checkout & payment | Server-side checkout, Stripe PaymentIntent, webhooks, payments, Buy Now |
+| 10 | Order confirmation | Confirmation page with payment status polling and retry |
+| 11 | Account & orders | Account hub, addresses, order history and detail, cancel + refund, buy again |
+| 12 | Admin catalog management | Admin pages to create, edit, publish, and archive products, variants, images, and categories |
+| 13 | Polish & testing | Responsive layout, all states, accessibility, end-to-end test |
+| 14 | Deployment | Production build on a single origin, live Stripe webhook |
 
 ```
-0 ─► 1 ─► 2 ─► 3 ─► 4 ─► 5 ─► 6 ─► 7 ─► 8 ─► 9 ─► 10 ─► 11 ─► 12 ─► 13
-          │                         ▲         ▲
-          └── auth is needed by ────┴─────────┘ (account menu in 4, cart merge in 8, checkout in 9)
+0 ─► 1 ─► 2 ─► 3 ─► 4 ─► 5 ─► 6 ─► 7 ─► 8 ─► 9 ─► 10 ─► 11 ─► 12 ─► 13 ─► 14
+          │                         ▲         ▲                     ▲
+          └── auth is needed by ────┴─────────┴─────────────────────┘
+              (account menu in 4, cart merge in 8, checkout in 9, admin role in 12)
 ```
 
-Phases 0–10 cover the core flow (Home → Search/Category → Product → Cart → Checkout → Confirmation). Phase 11 completes the MVP with Orders. Phases 12–13 make it production ready.
+Phases 0–10 cover the core flow (Home → Search/Category → Product → Cart → Checkout → Confirmation). Phase 11 completes the shopper MVP with Orders. Phase 12 lets you manage the catalog yourself. Phases 13–14 make it production ready.
+
+Phase 12 doesn't depend on phases 9–11, so it can be moved earlier (for example straight after Phase 7) if you want to start editing products sooner. Until it is built, products can be edited directly in MongoDB Compass or Atlas. The model hooks don't run on those edits, so run `npm run catalog:resync` afterwards to recalculate the derived price and stock fields.
 
 ### Done in every phase
 
@@ -79,52 +83,59 @@ A phase is only complete when all of these hold:
 
 ---
 
-## Phase 1: Database Schema & Seed Data
+## Phase 1: Database Schema & Initial Import
 
-**Goal:** every collection is modeled, indexed, and filled with realistic data.
+**Goal:** every collection is modeled and indexed, and the catalog is imported **once** from the DummyJSON snapshot into MongoDB. From then on the app reads products and categories only from MongoDB (03-database-schema §2).
 
 **Backend**
-- Models exactly as in 03-database-schema §4:
+- All 9 models exactly as in 03-database-schema §5:
   - `User` (+ addresses)
-  - `Category`
-  - `Product` (+ variants, denormalization hook, `syncStockFields`)
+  - `Category` (+ `level`, `isActive`, `source`, audit fields)
+  - `Product` (+ variants, `status`, hooks, `syncStockFields`)
   - `Review`
   - `Cart`
+  - `Checkout` (TTL)
   - `Order` (+ status transition helper)
-- All indexes from 03-database-schema §5.
-- Seed pipeline in `src/seed/`:
-  1. `fetchSource.js`: calls `/products?limit=0` and `/products/categories` and writes both responses to `seed/data/`.
+  - `Payment`
+  - `StripeEvent` (TTL)
+- All indexes from 03-database-schema §6.
+- Import pipeline in `src/seed/`:
+  1. `fetchSource.js` (`npm run seed:fetch`): calls `/products?limit=0` and `/products/categories` and writes both responses to `seed/data/`. **The output is committed to git.** This is the only code that ever calls DummyJSON.
   2. `categoryMap.js`: creates 6 departments and 22 categories, and drops `vehicle` and `motorcycle`.
-  3. `transformProduct.js`:
-     - cents conversion and list price
-     - brand defaults to "Generic"
-     - bullets
-     - specs
-     - unique slugs
-  4. `generateVariants.js`: rules from 03-database-schema §2.5.
+  3. `transformProduct.js`: field mapping from 03-database-schema §3.3, with `status: "active"`, `source.provider: "dummyjson"`, `publishedAt`.
+  4. `generateVariants.js`: rules from 03-database-schema §3.6.
   5. `generateReviews.js`: keeps the 3 source reviews, adds generated ones, and calculates `ratingAvg`, `ratingCount`, and `ratingBreakdown`.
   6. `uploadImages.js`: uploads with an encoded URL to `amazon-clone/products/<slug>/<n>` using `overwrite: false`. Already-uploaded images are skipped, at most 5 uploads run at a time, and the script prints progress.
-  7. `seedUsersAndOrders.js`: demo user + admin, demo address, 4 historical orders.
-  8. `seed.js`: runs the steps above, calls `syncIndexes()`, and prints a summary. `--destroy` clears everything.
+  7. `seedUsersAndOrders.js`: demo user + admin, demo address, 4 historical orders with matching `payments`.
+  8. `seed.js`:
+     - **refuses to run if `products` or `categories` already contain documents**
+     - `--reset` (development only, asks for confirmation) wipes everything and re-imports
+     - otherwise runs steps 2–7, calls `syncIndexes()`, and prints a summary
+  9. `resyncCatalog.js` (`npm run catalog:resync`): recalculates the derived fields on every product. Use it after editing products directly in Compass or Atlas.
 - Unit tests:
   - `transformProduct` (cents rounding, list price rule, slug collision)
   - `generateVariants` (counts per category)
-  - `Product` pre-save hook (min/max price, inStock)
+  - `Product` hooks (min/max price, inStock, `department` set from the category, one default variant)
+  - The seed refuses to run against a non-empty catalog
 
 **Frontend:** none.
 
 **Done when**
-- `npm run seed` finishes and prints:
+- `npm run seed` on an empty database finishes and prints:
   - 28 categories
   - 184 products
   - about 310 variants
   - about 1,600 reviews
   - 2 users
-  - 4 orders
+  - 4 orders and 4 payments
   - 424 images
-- Running `npm run seed` again creates no duplicate Cloudinary images and gives the same counts.
-- In Atlas or Compass, a product document matches the schema, and every index is listed.
+- Running `npm run seed` a second time refuses and changes nothing.
+- `npm run seed -- --reset` re-imports without creating duplicate Cloudinary images.
+- In Atlas or Compass:
+  - a product document matches the schema
+  - every index from 03-database-schema §6 is listed, including the two TTL indexes
 - A product's Cloudinary URL opens in the browser.
+- The seed makes no requests to `dummyjson.com/products` (check the log). It reads only `seed/data/`. Images already in Cloudinary are skipped by checking for their `public_id` with the Cloudinary Admin API, so they aren't fetched from the DummyJSON CDN again.
 
 ---
 
@@ -177,7 +188,7 @@ A phase is only complete when all of these hold:
 
 **Backend**
 - `GET /api/categories`: the full tree, sorted.
-- `GET /api/products/home` returns `{ bestSellers, newArrivals, deals, topRated: [{ department, products }] }`. Each product has only the card fields (03-database-schema §6.1).
+- `GET /api/products/home` returns `{ bestSellers, newArrivals, deals, topRated: [{ department, products }] }`. Each product has only the card fields (03-database-schema §7.1).
 - Cache headers: `Cache-Control: public, max-age=300` on both.
 
 **Frontend**
@@ -271,7 +282,7 @@ A phase is only complete when all of these hold:
 **Goal:** complete listing pages with filters, sorting, and pagination for both search results and categories.
 
 **Backend**
-- Complete `GET /api/products` (03-database-schema §6.2):
+- Complete `GET /api/products` (03-database-schema §7.2):
   - Filters: `minPrice`, `maxPrice`, `rating`, `brand`, `inStock`
   - Sorts: `price_asc`, `price_desc`, `rating`, `newest`
   - Response: `{ items, total, page, pages, facets: { brands: [{ name, count }] } }`
@@ -409,51 +420,75 @@ A phase is only complete when all of these hold:
   - total
   - `estimatedDelivery` using business days
   - Unit tests cover the boundaries ($34.99 vs $35.00, rounding).
-- `POST /checkout/quote` with `{ source: "cart" }` or `{ source: "buy_now", item }`, plus `deliveryMethod` → returns the totals and all three delivery options with their prices and dates.
-- `order.service.create` (03-database-schema §6.5):
-  - one transaction: conditional stock decrement, then snapshot insert
-  - `checkoutId` makes repeated requests return the same order
-  - after commit: create the PaymentIntent (`amount = totalCents`, `metadata.orderNumber`)
-  - returns `{ orderNumber, clientSecret }`
-- `POST /webhooks/stripe`:
-  - `express.raw`, `stripe.webhooks.constructEvent`
-  - `succeeded` → `markPaid`
-  - `payment_failed` → cancel + release stock
-  - always answers `200` once the signature is valid
-- `jobs/expirePendingOrders.js`, started from `server.js`.
-- Tests:
-  - order totals come only from the server
-  - insufficient stock → 409 with nothing written
-  - repeating a `checkoutId` returns the same order
-  - `markPaid` runs only once
-  - expiry releases the stock
+- `checkout.service.js`, using the `checkouts` collection (03-database-schema §5.6, §7.5):
+  - `start(user, { source, item? })`: deletes the user's other open checkouts, copies the items, picks the default address, and calculates the quote. Returns the checkout + `issues`.
+  - `update(checkoutId, { addressId?, deliveryMethod? })`: stores the address snapshot and recalculates the quote.
+  - `place(checkoutId, { expectedTotalCents })`:
+    1. Recalculate the quote. If the total differs, return `409 price_changed`.
+    2. Transaction: conditional stock `$inc`, `syncStockFields`, insert the order (`checkout` is unique), checkout → `completed`.
+    3. After commit: `payment.service.createIntent(order)` with idempotency key `pi-<orderId>`, then insert a `payments` document.
+    4. Return `{ orderNumber, clientSecret }`.
+  - If the same checkout is placed again, return the existing order and its `clientSecret`.
+- `payment.service.js`: `createIntent`, `getClientSecret` (for `POST /orders/:orderNumber/payment-intent`), `cancelIntent`, `refund`.
+- `stripeWebhook.service.js` + `POST /webhooks/stripe`:
+  - `express.raw` and `constructEvent`
+  - insert into `stripeEvents` (unique `eventId`) and skip events already processed
+  - handle the event types listed in 03-database-schema §5.9, each in a transaction
+  - on `succeeded`, check the amount and currency match the order before marking it paid
+  - return 500 if processing fails, so Stripe retries
+  - **`payment_failed` does not cancel the order.** It records `lastError` so the user can retry.
+- `jobs/expirePendingOrders.js` (every 60 s):
+  1. cancel the PaymentIntent
+  2. release the stock
+  3. order → `cancelled` (`reservation_expired`) and payment → `canceled`
+  - Skip orders whose PaymentIntent is `succeeded` or `processing`.
+- Tests (with Stripe mocked; webhooks signed with `generateTestHeaderString`):
+  - the quote ignores any prices sent by the client
+  - `price_changed` when a variant's price changes between quote and place
+  - insufficient stock → 409 and nothing is written
+  - placing the same checkout twice → one order, one PaymentIntent
+  - the same webhook event delivered twice → applied once
+  - an amount mismatch → the order isn't marked paid
+  - `payment_failed` leaves the order `pending_payment`
+  - expiry releases the stock and cancels the PaymentIntent
+  - a payment that succeeds after the order expired → automatic refund
 
 **Frontend**
+- `checkoutApi.js`: `startCheckout`, `getCheckout`, `updateCheckout`, `placeOrder`, `retryPaymentIntent`. `checkoutSlice` only holds `checkoutId` and `buyNowItem`.
+- When `/checkout` opens, call `startCheckout` (from the cart, or with `buyNowItem`). After a reload, `getCheckout(checkoutId)` restores the same checkout.
 - `CheckoutPage` with `CheckoutHeader`: numbered sections, one open at a time (like Amazon's):
-  1. **Shipping address**: choose from saved addresses or "Add a new address" (`AddressForm` in a `Modal`). The default address is preselected.
-  2. **Delivery**: radio buttons with the price and date for Standard / Expedited / Next Day.
+  1. **Shipping address**: choose from saved addresses or "Add a new address" (`AddressForm` in a `Modal`). Choosing one calls `updateCheckout`.
+  2. **Delivery**: radio buttons with the price and date for Standard / Expedited / Next Day. Choosing one calls `updateCheckout`.
   3. **Payment**: Stripe `CardElement` styled to match. Card errors appear inline.
-  4. **Review items**: item list (from the cart or the Buy Now item), with a "Change" link back to the cart.
+  4. **Review items**: the checkout items with any `issues` (out of stock, price changed), and a "Change" link back to the cart.
 - `OrderSummary` sticky sidebar:
-  - Items, Shipping & handling, Total before tax, Estimated tax, **Order total**
-  - "Place your order" (yellow), disabled until an address and a delivery method are chosen and the card form is complete
+  - shows `checkout.quote`: Items, Shipping & handling, Total before tax, Estimated tax, **Order total**
+  - "Place your order" (yellow) is disabled until an address is chosen, there are no blocking issues, and the card form is complete
 - Placing the order:
-  1. `createOrder`
-  2. `stripe.confirmCardPayment(clientSecret)`
+  1. `placeOrder({ expectedTotalCents })`
+  2. `stripe.confirmCardPayment(clientSecret, { payment_method: { card } })`
   3. navigate to `/order/:orderNumber/confirmation`
-  - On payment error: show the message and allow a retry with the same order.
-  - On 409: return to the cart with a notice.
-- Buy Now from the product page: the checkout uses `buyNowItem` and leaves the cart unchanged.
-- `checkoutId` is generated when checkout opens and reset after success.
+  - If the card is declined: show Stripe's message, keep the user on the payment step, and retry with the **same** `clientSecret`.
+  - `409 price_changed`: show the new total and ask the user to confirm again.
+  - `409 out_of_stock`: go back to the cart with a notice.
+- Buy Now from the product page: `startCheckout({ source: "buy_now", item })`. The cart doesn't change.
 - Run `npm run stripe:listen` during this phase.
 
 **Done when**
-- Test card `4242 4242 4242 4242` gives a `paid` order. The stock goes down, those items leave the cart, and `salesCount` goes up.
-- Card `4000 0000 0000 0002` (declined) shows the error. Retrying with 4242 succeeds on the same order.
-- Double-clicking "Place your order" creates one order.
+- Test card `4242 4242 4242 4242`:
+  - gives a `paid` order and a `succeeded` payment showing card brand and last 4
+  - the stock goes down, those items leave the cart, and `salesCount` goes up
+- Card `4000 0000 0000 0002` (declined):
+  - shows the error, and the order stays `pending_payment`
+  - retrying with 4242 succeeds on the **same** order and payment, with `failedAttempts: 1`
+- Card `4000 0025 0000 3155` (3-D Secure) shows the authentication modal and completes.
+- Double-clicking "Place your order" creates one order and one PaymentIntent.
+- `stripe events resend <evt_id>` for an event already processed changes nothing.
+- An order left unpaid for 30 minutes (set to 1 minute in development) is cancelled, its stock is restored, and its PaymentIntent is cancelled in Stripe.
 - Two browsers buying the last unit at the same moment: one succeeds and the other gets an out-of-stock message.
 - Buy Now completes a purchase without changing the cart.
-- Changing the price in the browser's request has no effect on the total charged.
+- Changing a variant's price in Compass while a checkout is open (then `npm run catalog:resync`) triggers the "price changed" confirmation.
+- Reloading the checkout page keeps the selected address and delivery method.
 
 ---
 
@@ -462,7 +497,8 @@ A phase is only complete when all of these hold:
 **Goal:** a clear confirmation page after payment.
 
 **Backend**
-- `GET /orders/:orderNumber`: available only to the order's owner, otherwise 404.
+- `GET /orders/:orderNumber`: available only to the order's owner, otherwise 404. Includes the payment summary (`status`, `lastError.message`, card, `receiptUrl`).
+- `POST /orders/:orderNumber/payment-intent`: returns the `clientSecret` of the order's PaymentIntent while the order is `pending_payment`.
 
 **Frontend**
 - `OrderConfirmationPage`:
@@ -477,7 +513,8 @@ A phase is only complete when all of these hold:
     - totals
     - links: "Review or edit your order" (→ `/orders/:orderNumber`) and "Continue shopping"
   - If still pending after 20 s: "We're still confirming your payment" + a link to Your Orders.
-  - If cancelled: payment failed message + "Try again".
+  - If the payment has a `lastError` and the order is still pending: show the error + "Try another card". This gets the `clientSecret` with `retryPaymentIntent` and shows the card form again.
+  - If the order was cancelled (reservation expired): explain this, and link back to the cart.
 - The cart icon count updates (the `Cart` cache is invalidated).
 
 **Done when**
@@ -510,19 +547,83 @@ A phase is only complete when all of these hold:
   - empty state
 - `OrderDetailPage`:
   - `OrderTimeline` (from `statusHistory`)
-  - shipping address, payment method (brand •••• last4)
+  - shipping address, payment method (brand •••• last4), Stripe receipt link, refunds (if any)
   - order summary, items
   - Cancel button with confirmation modal when cancellable
 
 **Done when**
 - The demo user sees 4 seeded orders plus any new ones, with the correct statuses and filters.
-- Cancelling a paid order changes it to Cancelled, puts the stock back, and shows a refund in the Stripe dashboard.
+- Cancelling a paid order:
+  - changes it to Cancelled and puts the stock back
+  - creates a refund in the Stripe dashboard
+  - after the `charge.refunded` webhook, the order detail shows `Refunded`
 - Buy it again adds the items to the cart and opens the cart.
 - After `npm run orders:advance` the status and timeline update.
 
 ---
 
-## Phase 12: Polish & Testing
+## Phase 12: Admin Catalog Management
+
+**Goal:** you can manage products and categories yourself in the app, with no scripts or direct database edits.
+
+**Backend**
+- `routes/admin/index.js`: everything under `/api/admin` goes through `protect` + `requireAdmin`.
+- `adminProduct.service.js` (03-database-schema §5.3, §7.8):
+  - list with `q`, `status`, `category`, `page`, sorted by `updatedAt`
+  - get by id (all fields, including inactive variants)
+  - create (`status: "draft"`, `source.provider: "manual"`, `createdBy`)
+  - update via `findById` → assign → `save()`, so the hooks run
+  - variant rules: unique SKU, exactly one default, variants that have been ordered can only be deactivated
+  - publish: requires at least 1 image and at least 1 active variant with price > 0. Sets `publishedAt` the first time
+  - archive
+  - delete: only a draft that has never been ordered
+  - after an image is removed and the product saved, delete the image from Cloudinary
+- `adminCategory.service.js`:
+  - create and update (unique slug, parent must be a department)
+  - moving a category to a new department updates its products' `department` in a transaction
+  - delete is blocked while any products or child categories reference it
+  - deactivate
+- `admin/review.routes.js`: delete a review and recalculate the product's rating fields.
+- `image.service.js` + `POST /admin/uploads`:
+  - multer memory storage, `image/jpeg|png|webp`, max 5 MB
+  - streams to Cloudinary `amazon-clone/products/<productId>/`
+  - returns `{ url, publicId }`
+- Zod schemas for every admin body (`validators/admin/`). Unknown fields are rejected, so `department`, `ratingAvg`, `salesCount`, and the derived fields can't be set by the client.
+- Tests:
+  - a non-admin gets 403
+  - create → publish → visible in `/products`, and archive → hidden
+  - duplicate SKU → 409
+  - deleting an ordered product → 409
+  - deleting a category that has products → 409
+  - moving a category updates its products' `department`
+
+**Frontend**
+- `AdminRoute`, `AdminLayout` (side nav: Products, Categories, "Back to store"). An "Admin" link appears in the account menu for admins only.
+- `AdminProductsPage`:
+  - table with thumbnail, title, SKU count, price range, total stock, status pill, and updated date
+  - search box, status and category filters, pagination
+  - "Add product" button
+- `AdminProductEditPage` (create and edit):
+  - `ProductForm`: title, slug (auto, editable), brand, category select (grouped by department), description, bullets (add/remove/reorder), tags, specs
+  - `VariantEditor`: option name + rows of label, SKU, price, list price, stock, default (radio), active
+  - `ImageManager`: drag-and-drop upload with progress, reorder, alt text, remove
+  - status actions (Save draft, Publish, Archive), with the validation errors from the server shown on the fields
+  - unsaved-changes warning when leaving the page
+- `AdminCategoriesPage`: department → category tree, add/edit in a modal (name, slug, parent, image, sort order, active), and delete with a clear message when it is blocked.
+- Prices are entered in dollars and converted to cents before sending. The API always works in cents.
+
+**Done when**
+- Signed in as `admin@example.com`, you can:
+  - create a new product with 2 variants and 3 uploaded images, then publish it
+  - find it in search and its category page, and buy it
+- Editing a price is reflected on the product page and in any new cart quote. Orders that already exist still show the old price.
+- Archiving the product removes it from search and the product page (404). It still appears correctly in past orders.
+- Creating a new category under a department shows it in the "All" sidebar and the filter sidebar.
+- The demo user gets a 404 at `/admin/products` and a 403 from `/api/admin/products`.
+
+---
+
+## Phase 13: Polish & Testing
 
 **Goal:** the MVP works on every screen size and passes accessibility and end-to-end checks.
 
@@ -544,8 +645,10 @@ A phase is only complete when all of these hold:
   - helmet headers
   - rate limits
   - no `passwordHash` in any response
-  - every order/cart/address query filters by `req.user._id`
+  - every order/cart/checkout/address query filters by `req.user._id`
+  - every `/api/admin` route rejects non-admins
   - Zod on every input
+  - go through the checklist in 05-coding-standards §8
 - **End-to-end** (`e2e/`, Playwright): one test of the core flow:
   1. home
   2. search "phone"
@@ -558,21 +661,27 @@ A phase is only complete when all of these hold:
   9. confirmation
   10. orders
 
-  plus one test for a guest-cart merge.
+  plus one test for a guest-cart merge and one for an admin creating and publishing a product that then appears in search.
 - README: features, screenshots, setup, test cards, demo login.
 
 **Done when:** the end-to-end tests pass locally, the Lighthouse targets are met, and no page has a layout bug at the sizes listed.
 
 ---
 
-## Phase 13: Deployment
+## Phase 14: Deployment
 
 **Goal:** a public demo with the same behavior as local.
 
 - **Single origin:** in production Express serves `client/dist` as static files, with a fallback to `index.html` for client-side routes. The cookie stays first-party and needs no CORS. Deploy as one web service (for example Render or Railway) with the build command `npm run build --prefix client && npm install --prefix server`.
 - Production env vars on the host. MongoDB Atlas network access must allow the host.
-- Stripe: add a webhook endpoint in the dashboard (`https://<host>/api/webhooks/stripe`, events `payment_intent.succeeded` and `payment_intent.payment_failed`) and put its signing secret in `STRIPE_WEBHOOK_SECRET`. Stay in **test mode**.
-- Seed the production database once with `npm run seed`.
+- Stripe: add a webhook endpoint in the dashboard (`https://<host>/api/webhooks/stripe`) and put its signing secret in `STRIPE_WEBHOOK_SECRET`. Stay in **test mode**. Subscribe it to these events:
+  - `payment_intent.succeeded`
+  - `payment_intent.payment_failed`
+  - `payment_intent.processing`
+  - `payment_intent.requires_action`
+  - `payment_intent.canceled`
+  - `charge.refunded`
+- Import the catalog into the production database **once** with `npm run seed`. From then on, manage it through `/admin` (the seed refuses to run again, and `--reset` is blocked in production).
 - Smoke test: run the end-to-end flow by hand on the live URL.
 
 **Done when:** the live URL completes the core flow with a test card, and the order appears in Your Orders.
@@ -589,5 +698,6 @@ These items are out of MVP scope. They're listed in rough priority order:
 4. "Inspired by your browsing history" row
 5. Password reset email
 6. Order confirmation email
-7. Admin product management UI (uses `POST /uploads`)
-8. Returns
+7. Admin order management (mark shipped/delivered in the UI instead of `orders:advance`)
+8. Bulk product import from CSV in the admin pages
+9. Returns
