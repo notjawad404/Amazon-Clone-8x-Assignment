@@ -324,14 +324,11 @@ AmazonClone/
 
 ## 8. Seed Data
 
-- **Source:** product data from the [DummyJSON](https://dummyjson.com/products?limit=0) API, which has about 190 products with titles, brands, descriptions, images, ratings, and reviews. The JSON is cached in `server/src/seed/data/` so seeding works without a network connection, apart from the Cloudinary upload.
-- **Categories:** at least 6 top-level categories, such as Electronics, Fashion, Home & Kitchen, Beauty, Sports & Outdoors, and Groceries. Source categories are mapped onto these.
-- **Variants:** products get variants by category:
-  - Fashion: sizes S, M, L, XL and 2–3 colors
-  - Electronics: storage or color options
-  - Others: a single "Standard" variant
-  
-  Variant prices are the base price plus a small offset. Stock is random between 0 and 50, and about 10% of variants are set to 0 so out-of-stock states can be tested.
+The full DummyJSON analysis, the category mapping, and the variant rules are in [03-database-schema.md §2](03-database-schema.md#2-source-data-dummyjson). In summary:
+
+- **Source:** product data from the [DummyJSON](https://dummyjson.com/products?limit=0) API (194 products, checked 2026-10-04). 184 are used, because vehicles and motorcycles are excluded. The JSON is cached in `server/src/seed/data/` so seeding works without a network connection, apart from the Cloudinary upload.
+- **Categories:** 6 departments (Electronics, Fashion, Home & Kitchen, Grocery, Sports & Outdoors, Beauty & Personal Care) containing 22 categories mapped from the source.
+- **Variants:** apparel and shoes get sizes, phones and tablets get storage options, laptops get configurations, and everything else gets a single "Standard" variant. Variants never differ by color, because each product only has images for one color. The source stock is split across variants, and about 10% of variants are set to 0 so out-of-stock states can be tested.
 - **Ratings and reviews:** reviews come from the source data, with extra reviews generated using `@faker-js/faker` so each product has 3–15. `ratingAvg` and `ratingCount` are calculated from the reviews.
 - **Users:** a demo user (`demo@example.com` / `Password123!`) with an address and a few past orders in different statuses, plus an admin user.
 - **Commands:**
@@ -472,20 +469,6 @@ To test checkout, sign in as `demo@example.com` / `Password123!` and pay with ca
 
 ---
 
-## 11. Build Milestones
+## 11. Build Phases
 
-Each milestone ends with something that can be demoed.
-
-| # | Milestone | Done when |
-|---|---|---|
-| 1 | **Foundation**: scaffold, env config, DB connection, models, error handling, layout shell (Header, SubNav, Footer) | `npm run dev` serves the layout and `GET /api/health` returns OK |
-| 2 | **Seed data**: transform script, Cloudinary upload, demo users | `npm run seed` loads 100+ products across 6 categories, each with variants, images, and reviews |
-| 3 | **Browse**: homepage rows, search/category listing with filters, sort, and pagination | Searching "phone", filtering to 4★+ under $500, and sorting by price all work and are reflected in the URL |
-| 4 | **Product Details**: gallery, variant selector, buy box, reviews | Switching variants updates the price, stock, image, and URL |
-| 5 | **Auth**: sign up, sign in, sign out, `/me`, protected routes | Refreshing the page keeps the user signed in, and signing out clears the session |
-| 6 | **Cart**: guest cart, server cart, merge on sign in, save for later | A guest's cart survives a refresh and merges into the account cart after sign in |
-| 7 | **Checkout + Stripe**: addresses, delivery methods, quote, order creation, PaymentIntent, webhook, Buy Now | A test-card payment produces a `paid` order and lands on the confirmation page |
-| 8 | **Orders / Account**: order list and detail, cancel, buy it again, address management | Past orders show the correct statuses, and cancelling releases stock |
-| 9 | **Polish**: responsive layout, loading/empty/error states, 404 page, accessibility pass, README | The core flow works at 375px width and on desktop |
-
-Milestones 1–7 deliver the core flow. Milestones 8–9 complete the MVP.
+The build order is defined in [04-development-phases.md](04-development-phases.md), which replaces the milestone list that used to be here. The detailed folder layout is in [02-project-structure.md](02-project-structure.md), and the full schema is in [03-database-schema.md](03-database-schema.md). Where this document and those disagree, those documents are correct.
