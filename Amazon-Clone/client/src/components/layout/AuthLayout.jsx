@@ -1,8 +1,8 @@
-import { Link, Outlet } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { APP_NAME } from '../../utils/constants'
 import Logo from './Logo'
 
-export default function AuthLayout() {
+export default function AuthLayout({ children }) {
   return (
     <div className="flex min-h-screen flex-col bg-white">
       <header className="flex justify-center pt-3 pb-4">
@@ -14,11 +14,7 @@ export default function AuthLayout() {
           <Logo tone="dark" />
         </Link>
       </header>
-      <main id="main" className="flex flex-1 justify-center px-4">
-        <div className="w-full max-w-md">
-          <Outlet />
-        </div>
-      </main>
+      {children}
       <footer className="mt-10 border-t border-gray-300 bg-linear-to-b from-gray-50 to-white px-4 pt-6 pb-10 text-center text-xs">
         <Link to="/" className="text-link hover:text-link-hover hover:underline">
           Back to {APP_NAME}

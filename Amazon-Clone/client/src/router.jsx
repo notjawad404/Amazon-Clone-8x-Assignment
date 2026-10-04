@@ -1,6 +1,5 @@
 import { createBrowserRouter } from 'react-router-dom'
 import App from './App'
-import AuthLayout from './components/layout/AuthLayout'
 import Layout from './components/layout/Layout'
 import CartPage from './pages/CartPage'
 import HomePage from './pages/HomePage'
@@ -19,7 +18,7 @@ const PUBLIC_PAGES = [
 ]
 
 const PROTECTED_PAGES = [
-  { path: '/checkout', title: 'Checkout' },
+  { path: '/checkout', title: 'Checkout', layout: 'checkout' },
   { path: '/order/:orderNumber/confirmation', title: 'Order confirmation' },
   { path: '/account', title: 'Your Account' },
   { path: '/account/addresses', title: 'Your Addresses' },
@@ -34,9 +33,10 @@ const ADMIN_PAGES = [
   { path: '/admin/categories', title: 'Admin: Categories' },
 ]
 
-const toPlaceholderRoute = ({ path, title }) => ({
+const toPlaceholderRoute = ({ path, title, layout }) => ({
   path,
   element: <PlaceholderPage title={title} />,
+  handle: { layout },
 })
 
 export const router = createBrowserRouter([
@@ -51,19 +51,15 @@ export const router = createBrowserRouter([
           { path: '/cart', element: <CartPage /> },
           { element: <ProtectedRoute />, children: PROTECTED_PAGES.map(toPlaceholderRoute) },
           { element: <AdminRoute />, children: ADMIN_PAGES.map(toPlaceholderRoute) },
-          { path: '*', element: <NotFoundPage /> },
-        ],
-      },
-      {
-        element: <GuestOnlyRoute />,
-        children: [
           {
-            element: <AuthLayout />,
+            element: <GuestOnlyRoute />,
+            handle: { layout: 'minimal' },
             children: [
               { path: '/signin', element: <SignInPage /> },
               { path: '/signup', element: <SignUpPage /> },
             ],
           },
+          { path: '*', element: <NotFoundPage /> },
         ],
       },
     ],

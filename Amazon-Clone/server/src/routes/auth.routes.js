@@ -21,6 +21,6 @@ router.post(
   asyncHandler(authController.signIn),
 )
 router.post('/signout', authController.signOut)
-router.get('/me', protect, authController.getMe)
+router.get('/me', protect, asyncHandler(authController.getMe))
 
 export default router

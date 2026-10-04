@@ -38,6 +38,7 @@ describe('POST /api/auth/signup', () => {
       name: 'Jane Doe',
       email: 'jane@example.com',
       role: 'user',
+      deliveryLocation: null,
     })
     const me = await agent.get('/api/auth/me')
     expect(me.status).toBe(200)
@@ -173,6 +174,31 @@ describe('GET /api/auth/me', () => {
     const res = await request(app).get('/api/auth/me').set('Cookie', `${AUTH_COOKIE}=${token}`)
 
     expect(res.status).toBe(401)
+  })
+
+  it('returns only the city and zip of the default address', async () => {
+    const address = {
+      fullName: 'Jane Doe',
+      line1: '1 Main St',
+      state: 'WA',
+      phone: '2065550100',
+    }
+    const user = await User.create({
+      ...NEW_USER,
+      passwordHash: 'x',
+      addresses: [
+        { ...address, city: 'Tacoma', zip: '98402' },
+        { ...address, city: 'Seattle', zip: '98101', isDefault: true },
+      ],
+    })
+
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Cookie', `${AUTH_COOKIE}=${signToken(user._id)}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.deliveryLocation).toEqual({ city: 'Seattle', zip: '98101' })
+    expect(JSON.stringify(res.body)).not.toMatch(/1 Main St|2065550100/)
   })
 })
 

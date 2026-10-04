@@ -18,8 +18,25 @@ export function hashPassword(password) {
   return bcrypt.hash(password, BCRYPT_COST)
 }
 
+function toDeliveryLocation(addresses = []) {
+  const address = addresses.find((candidate) => candidate.isDefault)
+  return address ? { city: address.city, zip: address.zip } : null
+}
+
 export function toPublicUser(user) {
-  return { _id: user._id, name: user.name, email: user.email, role: user.role }
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    deliveryLocation: toDeliveryLocation(user.addresses),
+  }
+}
+
+export async function getProfile(userId) {
+  const user = await User.findById(userId).select('name email role addresses').lean()
+  if (!user) throw new ApiError(401, 'Please sign in to continue.', { code: 'unauthenticated' })
+  return toPublicUser(user)
 }
 
 export async function signUp({ name, email, password }) {

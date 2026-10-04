@@ -18,6 +18,6 @@ export function signOut(req, res) {
   res.status(204).end()
 }
 
-export function getMe(req, res) {
-  res.json(authService.toPublicUser(req.user))
+export async function getMe(req, res) {
+  res.json(await authService.getProfile(req.user._id))
 }

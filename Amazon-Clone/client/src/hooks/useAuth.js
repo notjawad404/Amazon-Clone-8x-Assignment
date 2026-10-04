@@ -7,6 +7,7 @@ export function useAuth() {
 
   return {
     user,
+    firstName: user?.name.split(' ')[0] ?? null,
     isAuthenticated: status === 'authenticated',
     isAdmin: user?.role === 'admin',
     isLoading: status === 'idle',
