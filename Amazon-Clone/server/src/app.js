@@ -6,6 +6,7 @@ import morgan from 'morgan'
 import { env } from './config/env.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { notFound } from './middleware/notFound.js'
+import { apiLimiter } from './middleware/rateLimit.js'
 import routes from './routes/index.js'
 
 const app = express()
@@ -18,7 +19,7 @@ app.use(cors({ origin: env.CLIENT_URL, credentials: true }))
 if (env.NODE_ENV !== 'test') {
   app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 }
-app.use('/api', routes)
+app.use('/api', apiLimiter, routes)
 app.use(notFound)
 app.use(errorHandler)
 

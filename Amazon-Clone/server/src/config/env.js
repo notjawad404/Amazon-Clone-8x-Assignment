@@ -7,7 +7,7 @@ if (process.env.NODE_ENV !== 'test') {
   dotenv.config({ path: fileURLToPath(new URL('../../.env', import.meta.url)), quiet: true })
 }
 
-const required = z.string().trim().min(1, 'is required')
+const required = z.string({ error: 'is required' }).trim().min(1, 'is required')
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

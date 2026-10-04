@@ -8,7 +8,8 @@ import { logger } from '../utils/logger.js'
 function toApiError(err) {
   if (err instanceof ApiError) return err
   if (err instanceof ZodError) {
-    return new ApiError(400, 'Invalid request', { details: err.issues })
+    const details = err.issues.map(({ path, message }) => ({ path: path.join('.'), message }))
+    return new ApiError(400, 'Please check the highlighted fields.', { details })
   }
   if (err instanceof mongoose.Error.ValidationError) {
     const details = Object.values(err.errors).map(({ path, message }) => ({ path, message }))
@@ -21,7 +22,7 @@ function toApiError(err) {
     return new ApiError(409, 'Duplicate value', { code: 'duplicate', details: err.keyValue })
   }
   if (err instanceof jwt.JsonWebTokenError) {
-    return new ApiError(401, 'Not signed in')
+    return new ApiError(401, 'Please sign in to continue.')
   }
   // body-parser errors (malformed JSON, payload too large) are safe to expose
   if (err?.expose && err.status < 500) {

@@ -24,7 +24,7 @@ Fill in the two env files. Each `.env.example` explains where every value comes 
 | File | Values |
 |---|---|
 | `server/.env` | `MONGODB_URI`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `CLOUDINARY_*` (`JWT_SECRET` is already generated) |
-| `client/.env` | `VITE_STRIPE_PUBLISHABLE_KEY`, `VITE_CLOUDINARY_CLOUD_NAME` |
+| `client/.env` | `VITE_STRIPE_PUBLISHABLE_KEY`, `VITE_CLOUDINARY_CLOUD_NAME` (the dev proxy follows `PORT` from `server/.env` automatically) |
 
 In Atlas, allow your IP under **Network Access**, or the connection will time out.
 
