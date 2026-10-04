@@ -19,6 +19,11 @@ export const CATALOG_CACHE_CONTROL = 'public, max-age=300'
 export const SEARCH_PAGE_SIZE = 24
 export const SEARCH_MAX_PAGE_SIZE = 48
 export const SEARCH_QUERY_MAX_LENGTH = 100
+export const SEARCH_SORTS = ['relevance', 'price_asc', 'price_desc', 'rating', 'newest']
+export const SEARCH_MAX_BRANDS = 20
+export const SEARCH_MAX_PRICE_DOLLARS = 100000
+export const SEARCH_MAX_RATING = 4
+export const BRAND_FACET_LIMIT = 50
 export const SUGGESTION_SCAN_LIMIT = 20
 export const SUGGESTION_PRODUCT_LIMIT = 5
 export const SUGGESTION_TERM_LIMIT = 6

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { calculateQuote, calculateShippingCents } from '../services/pricing.service.js'
+import {
+  calculateQuote,
+  calculateShippingCents,
+  freeDeliveryDate,
+} from '../services/pricing.service.js'
 
 describe('calculateShippingCents', () => {
   it('charges standard shipping below $35 and makes it free from $35', () => {
@@ -37,5 +41,14 @@ describe('calculateQuote', () => {
     const quote = calculateQuote({ items: [{ unitPriceCents: 100, qty: 1 }], now: friday })
 
     expect(quote.estimatedDelivery.toISOString().slice(0, 10)).toBe('2026-10-09')
+  })
+})
+
+describe('freeDeliveryDate', () => {
+  it('gives the standard delivery date only from $35', () => {
+    const friday = new Date('2026-10-02T12:00:00Z')
+
+    expect(freeDeliveryDate(3499, friday)).toBeNull()
+    expect(freeDeliveryDate(3500, friday)).toEqual(new Date('2026-10-09T12:00:00Z'))
   })
 })

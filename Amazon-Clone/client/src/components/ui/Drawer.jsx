@@ -22,7 +22,7 @@ function trapTab(event, container) {
   }
 }
 
-export default function Drawer({ isOpen, onClose, label, children }) {
+export default function Drawer({ isOpen, onClose, label, closeLabel = 'Close menu', children }) {
   const dialogRef = useRef(null)
   const onCloseRef = useRef(onClose)
 
@@ -73,7 +73,7 @@ export default function Drawer({ isOpen, onClose, label, children }) {
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close menu"
+          aria-label={closeLabel}
           className="mt-3 ml-2 cursor-pointer rounded-sm p-1 text-white focus-visible:ring-3 focus-visible:ring-white focus-visible:outline-none"
         >
           <Icon name="close" className="size-7" />

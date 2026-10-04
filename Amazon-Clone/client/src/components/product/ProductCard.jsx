@@ -1,12 +1,21 @@
 import { Link } from 'react-router-dom'
 import { imageSrcSet, imageUrl } from '../../utils/cloudinary'
+import { LOW_STOCK_THRESHOLD } from '../../utils/constants'
+import { formatDeliveryDate } from '../../utils/delivery'
 import Price from '../ui/Price'
 import StarRating from '../ui/StarRating'
 
 const IMAGE_WIDTH = 240
 
+function StockNote({ inStock, totalStock }) {
+  if (!inStock) return <p className="text-sm text-error">Currently unavailable</p>
+  if (totalStock > LOW_STOCK_THRESHOLD) return null
+  return <p className="text-sm text-price">Only {totalStock} left in stock - order soon.</p>
+}
+
 export default function ProductCard({ product }) {
-  const { slug, title, image, priceCents, listPriceCents, discountPercent, inStock } = product
+  const { slug, title, image, priceCents, listPriceCents, discountPercent } = product
+  const { inStock, totalStock, freeDeliveryDate } = product
 
   return (
     <article className="flex h-full flex-col rounded-sm border border-gray-200 bg-white">
@@ -44,7 +53,12 @@ export default function ProductCard({ product }) {
           </span>
         )}
         <Price priceCents={priceCents} listPriceCents={listPriceCents} />
-        {!inStock && <p className="text-sm text-error">Currently unavailable</p>}
+        {inStock && freeDeliveryDate && (
+          <p className="text-sm">
+            FREE delivery <span className="font-bold">{formatDeliveryDate(freeDeliveryDate)}</span>
+          </p>
+        )}
+        <StockNote inStock={inStock} totalStock={totalStock} />
       </div>
     </article>
   )

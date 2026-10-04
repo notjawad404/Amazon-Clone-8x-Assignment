@@ -1,8 +1,9 @@
 import mongoose from 'mongoose'
 import { Category, Product } from '../models/index.js'
 import { ApiError } from '../utils/ApiError.js'
-import { DEAL_MIN_DISCOUNT_PERCENT, HOME_ROW_LIMIT } from '../utils/constants.js'
+import { BRAND_FACET_LIMIT, DEAL_MIN_DISCOUNT_PERCENT, HOME_ROW_LIMIT } from '../utils/constants.js'
 import { discountPercent } from '../utils/money.js'
+import { freeDeliveryDate } from './pricing.service.js'
 import { buildSearchQuery, buildShopperFilter } from './search.service.js'
 
 const CATEGORY_FIELDS = 'name slug parent image sortOrder'
@@ -162,33 +163,55 @@ export async function getHome() {
   }
 }
 
-export async function searchProducts({ q, category, page, limit }) {
+function toListingCard(product, now) {
+  const card = toProductCard(product)
+  return {
+    ...card,
+    totalStock: product.totalStock,
+    freeDeliveryDate: freeDeliveryDate(card.priceCents, now),
+  }
+}
+
+async function brandFacet(facetFilter) {
+  const rows = await Product.aggregate([
+    { $match: facetFilter },
+    { $group: { _id: '$brand', count: { $sum: 1 } } },
+    { $sort: { count: -1, _id: 1 } },
+    { $limit: BRAND_FACET_LIMIT },
+  ])
+  return rows.map(({ _id, count }) => ({ name: _id, count }))
+}
+
+export async function searchProducts({ category, page, limit, ...params }) {
   const departments = await getVisibleTree()
   const scope = category ? findScope(departments, category) : null
   if (category && !scope) {
     throw new ApiError(404, 'Category not found', { code: 'category_not_found' })
   }
 
-  const { filter, sort, projection } = buildSearchQuery({
-    q,
+  const { filter, facetFilter, sort, projection } = buildSearchQuery({
+    ...params,
     scope,
     visibleCategoryIds: visibleCategoryIds(departments),
   })
-  const [products, total] = await Promise.all([
+  const [products, total, brands] = await Promise.all([
     Product.find(filter)
-      .select({ ...PRODUCT_CARD_PROJECTION, ...projection })
+      .select({ ...PRODUCT_CARD_PROJECTION, totalStock: 1, ...projection })
       .sort(sort)
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),
     Product.countDocuments(filter),
+    brandFacet(facetFilter),
   ])
 
+  const now = new Date()
   return {
-    items: products.map(toProductCard),
+    items: products.map((product) => toListingCard(product, now)),
     total,
     page,
     pages: Math.ceil(total / limit),
+    facets: { brands },
     category: scope,
   }
 }

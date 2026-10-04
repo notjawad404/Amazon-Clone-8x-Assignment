@@ -575,7 +575,11 @@ Every shopper query includes `{ status: "active" }` and excludes inactive catego
 | `rating` | `{ ratingAvg: -1, ratingCount: -1 }` |
 | `newest` | `{ publishedAt: -1 }` |
 
-Pagination uses `skip`/`limit` (24 per page) and `countDocuments`. The brand facet runs `distinct("brand", filterWithoutBrand)`.
+All sorts add `_id: 1` as a tiebreaker so pages don't overlap. `minPrice`/`maxPrice` are in dollars and converted to cents on the server. `brand` repeats for several brands (`brand=Apple&brand=Samsung`). The client sends `inStock=true` unless the shopper ticks "Include out of stock" (`inStock=false` in the page URL).
+
+Pagination uses `skip`/`limit` (24 per page) and `countDocuments`. The brand facet runs `aggregate([{ $match: filterWithoutBrand }, { $group: { _id: "$brand", count } }])`, sorted by count, max 50.
+
+Response: `{ items, total, page, pages, facets: { brands: [{ name, count }] }, category }`. Each item is a product card plus `totalStock` (for "Only N left") and `freeDeliveryDate` (standard delivery date from `pricing.service`, or `null` below the free shipping threshold).
 
 **Search suggestions** (`GET /products/suggestions?q=&category=`), called by the search bar as the user types (debounced 300 ms):
 

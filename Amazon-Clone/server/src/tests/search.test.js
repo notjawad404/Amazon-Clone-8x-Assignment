@@ -4,7 +4,7 @@ import app from '../app.js'
 import { Category, Product } from '../models/index.js'
 import { buildSearchQuery } from '../services/search.service.js'
 import { collectTerms } from '../services/suggestion.service.js'
-import { createProduct } from './helpers.js'
+import { createCategoryTree, createProduct, variant } from './helpers.js'
 
 beforeAll(async () => {
   await Product.createIndexes()
@@ -73,6 +73,31 @@ describe('buildSearchQuery', () => {
     expect(department.filter.department).toBe('d1')
     expect(category.filter.category).toBe('c1')
   })
+
+  it('converts the price range to cents and leaves brand out of the facet filter', () => {
+    const { filter, facetFilter } = buildSearchQuery({
+      visibleCategoryIds,
+      minPrice: 25,
+      maxPrice: 49.99,
+      brand: ['Apple'],
+    })
+
+    expect(filter.minPriceCents).toMatchObject({ $gte: 2500, $lte: 4999 })
+    expect(filter.brand).toMatchObject({ $in: ['Apple'] })
+    expect(facetFilter.brand).toBeUndefined()
+    expect(facetFilter.minPriceCents).toBe(filter.minPriceCents)
+  })
+
+  it('sorts by the chosen field instead of relevance, even with a query', () => {
+    const { sort, projection } = buildSearchQuery({
+      q: 'phone',
+      sort: 'price_desc',
+      visibleCategoryIds,
+    })
+
+    expect(sort).toEqual({ minPriceCents: -1, _id: 1 })
+    expect(projection).toEqual({})
+  })
 })
 
 describe('GET /api/products', () => {
@@ -137,10 +162,115 @@ describe('GET /api/products', () => {
     [{ q: 'x'.repeat(101) }],
     [{ category: 'Bad Slug!' }],
     [{ sort: 'price' }],
+    [{ minPrice: -1 }],
+    [{ minPrice: 50, maxPrice: 20 }],
+    [{ rating: 5 }],
+    [{ inStock: 'yes' }],
   ])('rejects invalid params %j with 400', async (params) => {
     const res = await request(app).get('/api/products').query(params)
 
     expect(res.status).toBe(400)
+  })
+})
+
+async function createListing() {
+  const { category } = await createCategoryTree()
+  const listed = (title, brand, priceCents, stock, ratingAvg, publishedAt) =>
+    createProduct(category, {
+      title,
+      brand,
+      ratingAvg,
+      publishedAt: new Date(publishedAt),
+      variants: [variant({ priceCents, stock })],
+    })
+
+  await listed('Budget Phone', 'Acme', 1500, 5, 3.2, '2026-01-01')
+  await listed('Mid Phone', 'Apple', 4000, 0, 4.1, '2026-03-01')
+  await listed('Pro Phone', 'Apple', 9000, 2, 4.8, '2026-02-01')
+  await listed('Max Phone', 'Samsung', 20000, 9, 4.5, '2026-04-01')
+}
+
+const listing = (queryString) => request(app).get(`/api/products?sort=price_asc&${queryString}`)
+
+describe('GET /api/products filters', () => {
+  it.each([
+    ['minPrice=40', ['Mid Phone', 'Pro Phone', 'Max Phone']],
+    ['maxPrice=90', ['Budget Phone', 'Mid Phone', 'Pro Phone']],
+    ['minPrice=20&maxPrice=90', ['Mid Phone', 'Pro Phone']],
+    ['rating=4', ['Mid Phone', 'Pro Phone', 'Max Phone']],
+    ['brand=Apple', ['Mid Phone', 'Pro Phone']],
+    ['brand=Apple&brand=Samsung', ['Mid Phone', 'Pro Phone', 'Max Phone']],
+    ['inStock=true', ['Budget Phone', 'Pro Phone', 'Max Phone']],
+    ['inStock=false', ['Budget Phone', 'Mid Phone', 'Pro Phone', 'Max Phone']],
+    ['rating=4&maxPrice=100&inStock=true&brand=Apple', ['Pro Phone']],
+  ])('filters by %s', async (queryString, expected) => {
+    await createListing()
+
+    const res = await listing(queryString)
+
+    expect(res.status).toBe(200)
+    expect(titles(res)).toEqual(expected)
+    expect(res.body.total).toBe(expected.length)
+  })
+
+  it.each([
+    ['price_asc', ['Budget Phone', 'Mid Phone', 'Pro Phone', 'Max Phone']],
+    ['price_desc', ['Max Phone', 'Pro Phone', 'Mid Phone', 'Budget Phone']],
+    ['rating', ['Pro Phone', 'Max Phone', 'Mid Phone', 'Budget Phone']],
+    ['newest', ['Max Phone', 'Mid Phone', 'Pro Phone', 'Budget Phone']],
+  ])('sorts by %s', async (sort, expected) => {
+    await createListing()
+
+    const res = await request(app).get('/api/products').query({ sort })
+
+    expect(titles(res)).toEqual(expected)
+  })
+
+  it('returns the last partial page and an empty page past the end', async () => {
+    await createListing()
+
+    const last = await listing('limit=3&page=2')
+    const pastEnd = await listing('limit=3&page=3')
+
+    expect(titles(last)).toEqual(['Max Phone'])
+    expect(last.body).toMatchObject({ total: 4, page: 2, pages: 2 })
+    expect(pastEnd.status).toBe(200)
+    expect(pastEnd.body).toMatchObject({ items: [], total: 4, page: 3, pages: 2 })
+  })
+
+  it('counts brands without applying the brand filter', async () => {
+    await createListing()
+
+    const res = await listing('brand=Samsung')
+
+    expect(titles(res)).toEqual(['Max Phone'])
+    expect(res.body.facets.brands).toEqual([
+      { name: 'Apple', count: 2 },
+      { name: 'Acme', count: 1 },
+      { name: 'Samsung', count: 1 },
+    ])
+  })
+
+  it('applies the other filters to the brand counts', async () => {
+    await createListing()
+
+    const res = await listing('rating=4&inStock=true')
+
+    expect(res.body.facets.brands).toEqual([
+      { name: 'Apple', count: 1 },
+      { name: 'Samsung', count: 1 },
+    ])
+  })
+
+  it('adds stock and a free delivery date only from the free shipping threshold', async () => {
+    await createListing()
+
+    const res = await listing('')
+    const [budget, mid] = res.body.items
+
+    expect(budget).toMatchObject({ totalStock: 5, freeDeliveryDate: null })
+    expect(mid.totalStock).toBe(0)
+    expect(new Date(mid.freeDeliveryDate).getTime()).toBeGreaterThan(Date.now())
   })
 })
 

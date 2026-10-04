@@ -10,6 +10,11 @@ export function calculateShippingCents(subtotalCents, deliveryMethod) {
   return DELIVERY_METHODS[deliveryMethod].priceCents
 }
 
+export function freeDeliveryDate(subtotalCents, now = new Date()) {
+  if (calculateShippingCents(subtotalCents, 'standard') > 0) return null
+  return addBusinessDays(now, DELIVERY_METHODS.standard.businessDays)
+}
+
 export function calculateTaxCents(subtotalCents) {
   return Math.round(subtotalCents * TAX_RATE)
 }
