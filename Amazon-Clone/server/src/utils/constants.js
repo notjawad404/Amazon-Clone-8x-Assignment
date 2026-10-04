@@ -16,6 +16,7 @@ export const SOURCE_PROVIDERS = ['dummyjson', 'manual']
 export const HOME_ROW_LIMIT = 12
 export const DEAL_MIN_DISCOUNT_PERCENT = 10
 export const CATALOG_CACHE_CONTROL = 'public, max-age=300'
+export const LOCATIONS_CACHE_CONTROL = 'public, max-age=86400'
 
 export const SEARCH_PAGE_SIZE = 24
 export const SEARCH_MAX_PAGE_SIZE = 48
@@ -61,6 +62,11 @@ export const ORDER_TRANSITIONS = {
 export const ORDER_PAYMENT_STATUSES = ['unpaid', 'paid', 'refunded', 'partially_refunded']
 export const CANCEL_REASONS = ['user_cancelled', 'reservation_expired', 'admin_cancelled']
 export const RESERVATION_MINUTES = 30
+export const EXPIRY_JOB_INTERVAL_MS = 60_000
+export const EXPIRY_BATCH_SIZE = 50
+export const ORDER_NUMBER_ATTEMPTS = 3
+// Card-only checkout: no payment method that would send the shopper off-site.
+export const AUTOMATIC_PAYMENT_METHODS = { enabled: true, allow_redirects: 'never' }
 
 export const PAYMENT_STATUSES = [
   'requires_payment_method',

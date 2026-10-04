@@ -32,3 +32,5 @@ export const LOW_STOCK_THRESHOLD = 5
 export const MAX_CART_QTY = 30
 export const MAX_CART_ITEMS = 50
 export const SELLER_NAME = APP_NAME
+export const CHECKOUT_STORAGE_KEY = 'checkout'
+export const LOCATIONS_CACHE_SECONDS = 3600

@@ -11,3 +11,7 @@ export function splitCents(cents) {
     cents: String(cents % 100).padStart(2, '0'),
   }
 }
+
+export function formatShipping(priceCents) {
+  return priceCents === 0 ? 'FREE' : formatCents(priceCents)
+}

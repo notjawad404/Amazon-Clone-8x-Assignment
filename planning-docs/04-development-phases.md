@@ -474,7 +474,7 @@ A phase is only complete when all of these hold:
   - `409 price_changed`: show the new total and ask the user to confirm again.
   - `409 out_of_stock`: go back to the cart with a notice.
 - Buy Now from the product page: `startCheckout({ source: "buy_now", item })`. The cart doesn't change.
-- Run `npm run stripe:listen` during this phase.
+- Run `npm run stripe:listen` during this phase. The Stripe CLI must be logged in (`stripe login`) to the **same account** as `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` must be the secret that `stripe listen --print-secret` prints for that account.
 
 **Done when**
 - Test card `4242 4242 4242 4242`:
@@ -486,7 +486,7 @@ A phase is only complete when all of these hold:
 - Card `4000 0025 0000 3155` (3-D Secure) shows the authentication modal and completes.
 - Double-clicking "Place your order" creates one order and one PaymentIntent.
 - `stripe events resend <evt_id>` for an event already processed changes nothing.
-- An order left unpaid for 30 minutes (set to 1 minute in development) is cancelled, its stock is restored, and its PaymentIntent is cancelled in Stripe.
+- An order left unpaid for 30 minutes (set `RESERVATION_MINUTES=1` in `server/.env` to test this quickly) is cancelled, its stock is restored, and its PaymentIntent is cancelled in Stripe.
 - Two browsers buying the last unit at the same moment: one succeeds and the other gets an out-of-stock message.
 - Buy Now completes a purchase without changing the cart.
 - Changing a variant's price in Compass while a checkout is open (then `npm run catalog:resync`) triggers the "price changed" confirmation.

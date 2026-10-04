@@ -1,10 +1,13 @@
-import { Link } from 'react-router-dom'
+import { useDispatch } from 'react-redux'
+import { Link, useLocation } from 'react-router-dom'
 import CartItem from '../components/cart/CartItem'
 import SavedItem from '../components/cart/SavedItem'
 import SubtotalBox, { SubtotalLine } from '../components/cart/SubtotalBox'
+import Alert from '../components/ui/Alert'
 import { buttonClasses } from '../components/ui/buttonStyles'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
+import { cartCheckoutRequested } from '../features/checkout/checkoutSlice'
 import { useCart, useCartContents } from '../hooks/useCart'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
@@ -76,6 +79,8 @@ export default function CartPage() {
   useDocumentTitle('Shopping Cart')
   const { isAuthenticated } = useCart()
   const { cart, isError, isFetching, refetch } = useCartContents()
+  const dispatch = useDispatch()
+  const notice = useLocation().state?.notice
 
   if (isError) {
     return (
@@ -98,6 +103,11 @@ export default function CartPage() {
     <div className="bg-page">
       <div className="mx-auto grid max-w-page items-start gap-5 px-3 py-5 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="space-y-5">
+          {notice && (
+            <Alert variant="info" className="bg-white">
+              {notice}
+            </Alert>
+          )}
           {!cart ? (
             <CartSkeleton />
           ) : (
@@ -124,7 +134,11 @@ export default function CartPage() {
         </div>
         {cart && inCart.length > 0 && (
           <div className="-order-1 lg:sticky lg:top-4 lg:order-0">
-            <SubtotalBox cart={cart} isUpdating={isFetching} />
+            <SubtotalBox
+              cart={cart}
+              isUpdating={isFetching}
+              onCheckout={() => dispatch(cartCheckoutRequested())}
+            />
           </div>
         )}
       </div>

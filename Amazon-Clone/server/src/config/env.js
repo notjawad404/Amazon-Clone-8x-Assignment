@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { z } from 'zod'
+import { RESERVATION_MINUTES } from '../utils/constants.js'
 
 // Tests set their own values and must never pick up real credentials.
 if (process.env.NODE_ENV !== 'test') {
@@ -24,6 +25,7 @@ const envSchema = z.object({
     .trim()
     .regex(/^(whsec_\w+)?$/, 'must start with whsec_')
     .default(''),
+  RESERVATION_MINUTES: z.coerce.number().int().min(1).max(120).default(RESERVATION_MINUTES),
   CLOUDINARY_CLOUD_NAME: required,
   CLOUDINARY_API_KEY: required,
   CLOUDINARY_API_SECRET: required,

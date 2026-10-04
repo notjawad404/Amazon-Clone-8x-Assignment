@@ -66,5 +66,11 @@ npm run stripe:listen
 | `npm run check:services` | Tests the MongoDB, Stripe and Cloudinary credentials |
 | `npm test` | Server tests (Vitest + supertest + in-memory MongoDB) |
 | `npm run lint` | ESLint for server and client |
-| `npm run seed` | Imports the catalog into an empty database |
+| `npm run seed` | Imports the catalog into an empty database, plus countries/states/cities if missing |
+| `npm run seed:locations` | Imports countries, states, and cities on their own (skips if already imported) |
 | `npm run stripe:listen` | Forwards Stripe webhooks to the local API |
+
+## Data sources
+
+- Product catalog: [DummyJSON](https://dummyjson.com) snapshot, imported once.
+- Countries, states, and cities: [dr5hn/countries-states-cities-database](https://github.com/dr5hn/countries-states-cities-database), licensed under the [Open Database License (ODbL-1.0)](https://opendatacommons.org/licenses/odbl/1-0/).

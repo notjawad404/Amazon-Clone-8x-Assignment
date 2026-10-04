@@ -13,7 +13,7 @@ const DEMO_ADDRESS = {
   line1: '123 Main St',
   line2: 'Apt 4B',
   city: 'Seattle',
-  state: 'WA',
+  state: 'Washington',
   zip: '98101',
   country: 'US',
   phone: '206-555-0100',

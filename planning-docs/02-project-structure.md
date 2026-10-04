@@ -145,13 +145,17 @@ client/
     │   │   ├── QtyStepper.jsx     # Trash/− · qty · + (minus becomes Delete at 1)
     │   │   └── SubtotalBox.jsx
     │   ├── checkout/
+    │   │   ├── CheckoutForm.jsx   # Numbered sections + summary; one section open at a time
+    │   │   ├── CheckoutSection.jsx
     │   │   ├── AddressStep.jsx
+    │   │   ├── AddressSummary.jsx
     │   │   ├── DeliveryStep.jsx
     │   │   ├── PaymentStep.jsx    # Stripe <CardElement>
     │   │   ├── ReviewItemsStep.jsx
     │   │   └── OrderSummary.jsx   # Sticky sidebar with totals + Place order
     │   ├── account/
     │   │   ├── AddressForm.jsx
+    │   │   ├── RegionFields.jsx   # Country → state/province → city (suggestions)
     │   │   └── AddressCard.jsx
     │   ├── orders/
     │   │   ├── OrderCard.jsx
@@ -189,6 +193,8 @@ client/
     │   ├── useSearchParamsState.js# Read/write filter state in the URL
     │   ├── useFocusTrap.js       # Focus trap, Esc, scroll lock for Modal and Drawer
     │   ├── useLineAction.js      # Pending + error state for one cart line
+    │   ├── useCheckoutSession.js # restore (reload) or start a checkout; waits for guest-cart merge
+    │   ├── usePlaceOrder.js      # place → confirmCardPayment → confirmation; retries reuse the PI
     │   └── useDebounce.js
     │
     ├── utils/
@@ -345,11 +351,14 @@ server/
     │   ├── cart.service.js        # add/update/remove/merge/preview, removePurchasedItems
     │   ├── cartView.service.js    # hydrate cart lines + subtotal summary
     │   ├── pricing.service.js     # subtotal, shipping, tax, total, delivery dates
-    │   ├── checkout.service.js    # start, update, quote, place (txn → order + payment)
-    │   ├── order.service.js       # status transitions, cancel, releaseStock, expireReservations
-    │   ├── payment.service.js     # Stripe PaymentIntent create/cancel, refunds
+    │   ├── checkout.service.js    # start, get, update, place (idempotent per checkout)
+    │   ├── checkoutPricing.service.js # price items from current data, issues, quote, delivery options
+    │   ├── order.service.js       # createOrder (txn: claim checkout, reserve stock, insert order)
+    │   ├── inventory.service.js   # reserveStock / releaseStock / recordSales (session-aware)
+    │   ├── payment.service.js     # ensurePaymentIntent (one per order), cancel, refund
     │   ├── stripeWebhook.service.js # verify, record in stripeEvents, dispatch by event type
     │   ├── address.service.js
+    │   ├── location.service.js    # countries/states/cities lists, normalizeRegion for addresses
     │   ├── image.service.js       # Buffer → Cloudinary upload stream, destroy by publicId
     │   ├── adminProduct.service.js  # CRUD, publish/archive, variant rules, image cleanup
     │   └── adminCategory.service.js # CRUD, reparent (txn), delete guards
@@ -385,7 +394,7 @@ server/
     │   └── dates.js               # addBusinessDays
     │
     ├── jobs/
-    │   └── expirePendingOrders.js # setInterval 60s → order.service.expireReservations()
+    │   └── expirePendingOrders.js # every 60 s: cancel PI, release stock, order → cancelled
     │
     ├── seed/                      # Initial import only. The app never reads these files at runtime
     │   ├── seed.js                # npm run seed (refuses if the catalog isn't empty) / -- --reset (dev only)

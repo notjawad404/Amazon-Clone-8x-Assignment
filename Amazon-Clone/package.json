@@ -5,6 +5,7 @@
     "install:all": "npm install --prefix server && npm install --prefix client",
     "dev": "concurrently -n server,client -c blue,green \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "seed": "npm run seed --prefix server",
+    "seed:locations": "npm run seed:locations --prefix server",
     "stripe:listen": "stripe listen --forward-to localhost:5000/api/webhooks/stripe",
     "check:services": "npm run check:services --prefix server",
     "test": "npm test --prefix server",

@@ -10,6 +10,7 @@ import { logger } from '../utils/logger.js'
 import { DEPARTMENTS, EXCLUDED_SOURCE_CATEGORIES } from './categoryMap.js'
 import { generateReviews } from './generateReviews.js'
 import { generateVariants } from './generateVariants.js'
+import { importLocations } from './seedLocations.js'
 import { seedUsersAndOrders } from './seedUsersAndOrders.js'
 import { transformProduct } from './transformProduct.js'
 import { uploadProductImages } from './uploadImages.js'
@@ -211,6 +212,13 @@ async function main() {
     logger.info(`  ${summary.users} users (demo@example.com, admin@example.com)`)
     logger.info(`  ${summary.orders} orders, ${summary.payments} payments`)
     logger.info(`  ${summary.images} images`)
+
+    const locations = await importLocations()
+    if (!locations.skipped) {
+      logger.info(
+        `  ${locations.countries} countries, ${locations.states} states, ${locations.cities} cities`,
+      )
+    }
     return 0
   } catch (err) {
     if (!(err instanceof SeedRefusedError)) throw err

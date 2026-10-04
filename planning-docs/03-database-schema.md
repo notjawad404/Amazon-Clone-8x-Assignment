@@ -23,6 +23,8 @@ Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md
 | `orders` | Placed orders with item and address snapshots | 4 seeded, then grows |
 | `payments` | One Stripe PaymentIntent per order: status, card, errors, refunds | 1 per order |
 | `stripeEvents` | Log of received Stripe webhook events, so each is processed only once | Kept 90 days |
+| `countries` | Countries with their states/provinces embedded (reference data) | 250 countries, 5,308 states |
+| `cities` | Cities by country and state (reference data) | ~153,000 |
 
 General conventions:
 
@@ -257,10 +259,10 @@ Types use Mongoose terms. **R** = required, **U** = unique.
 | `fullName` | String | R |
 | `line1` | String | R |
 | `line2` | String | optional |
-| `city` | String | R |
-| `state` | String | R, 2-letter code |
-| `zip` | String | R, `^\d{5}(-\d{4})?$` |
-| `country` | String | R, default `"US"` |
+| `city` | String | R. Suggested from `cities`, but any name is accepted (the list misses small towns) |
+| `state` | String | Full name, max 100. Required and checked against `countries.states` when the country has states (a code like `TN` is stored as `Tennessee`); free text otherwise |
+| `zip` | String | Max 12. Required `^\d{5}(-\d{4})?$` for the US; an optional postal code elsewhere |
+| `country` | String | R, ISO 3166-1 alpha-2 that exists in `countries` |
 | `phone` | String | R |
 | `isDefault` | Boolean | At most one per user, enforced in the service layer |
 
@@ -503,6 +505,14 @@ This collection records every webhook event that Stripe sends, so that an event 
 
 ---
 
+### 5.10 `countries` and `cities` (reference data)
+
+Imported from the [dr5hn/countries-states-cities-database](https://github.com/dr5hn/countries-states-cities-database) dataset (ODbL-1.0). `npm run seed:locations:fetch` downloads it once and keeps only codes and names in `seed/data/locations.json` (committed, ~2.3 MB). `npm run seed:locations` imports it, and `npm run seed` runs that import when `countries` is empty. The app never calls the dataset at runtime.
+
+- `countries`: `{ code, name, states: [{ code, name }] }`. 21 territories have no states; their addresses use a free-text region.
+- `cities`: `{ country, state, name }`, where `state` is the state name. 1,027 states have no cities; the city field is then free text.
+- API: `GET /locations/countries` (`[{ code, name, hasStates }]`), `GET /locations/countries/:code/states`, `GET /locations/cities?country=&state=` (names). All public, `Cache-Control: public, max-age=86400`.
+
 ## 6. Indexes
 
 | Collection | Index | Options | Used by |
@@ -540,6 +550,8 @@ This collection records every webhook event that Stripe sends, so that an event 
 | `stripeEvents` | `{ eventId: 1 }` | unique | Process each event only once |
 | `stripeEvents` | `{ receivedAt: 1 }` | TTL 90 days | Cleanup |
 | `stripeEvents` | `{ status: 1, receivedAt: -1 }` | partial `{ status: "failed" }` | Find failed events |
+| `countries` | `{ code: 1 }` | unique | States for a country, address validation |
+| `cities` | `{ country: 1, state: 1, name: 1 }` | | Cities for a state, sorted |
 
 Indexes are declared in the schemas and created with `Model.syncIndexes()` during seeding. `autoIndex` is turned off in production. For search, `$text` is enough for a catalog of a few hundred products. Atlas Search is the upgrade path if typo tolerance or autocomplete is needed later.
 
@@ -643,7 +655,9 @@ Client                          API                                   MongoDB   
 2. **Order transaction.** For each item:
    `products.updateOne({ _id, variants: { $elemMatch: { _id: variantId, isActive: true, stock: { $gte: qty } } }, status: "active" }, { $inc: { "variants.$.stock": -qty } })`.
    If `modifiedCount === 0`, the transaction is aborted and the API returns `409 out_of_stock` with the affected items. Then `syncStockFields`, insert the order (`checkout` is unique, so a repeated request returns the existing order), and set the checkout to `completed`.
-3. **PaymentIntent.** It is created after the commit, using a Stripe idempotency key so a retried request can't create a second PaymentIntent. If Stripe fails, the order stays `pending_payment` with no payment, and the client can call `POST /orders/:orderNumber/payment-intent` to create the PaymentIntent again (same idempotency key).
+3. **PaymentIntent.** It is created after the commit, using a Stripe idempotency key so a retried request can't create a second PaymentIntent. It uses `automatic_payment_methods: { enabled: true, allow_redirects: "never" }` (current Stripe API versions reject `payment_method_types`; the card is enabled in the Dashboard). If Stripe fails, the order stays `pending_payment` with no payment, `place` returns `502 payment_unavailable` with the `orderNumber`, and the client calls `POST /orders/:orderNumber/payment-intent` to create the PaymentIntent again (same idempotency key).
+   - **Double submission:** the order transaction first claims the checkout (`open → completed`, conditional on `status: "open"`), so concurrent `place` calls for one checkout produce one order. A repeated `place` on a completed checkout returns the same `{ orderNumber, clientSecret, paymentStatus }`. `ensurePaymentIntent` reuses the order's payment if it exists, so one order never gets a second PaymentIntent, and one PaymentIntent can only be charged once.
+   - **Reservation time** is `RESERVATION_MINUTES` in `server/.env` (default 30).
 4. **Payment document.** Inserted with `status: requires_payment_method`.
 5. **Webhook receipt.** Steps, in order:
    1. `stripe.webhooks.constructEvent(rawBody, signature, secret)`. If it fails, return 400.

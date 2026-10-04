@@ -33,9 +33,16 @@ const addressFields = {
   line1: { type: String, required: true, trim: true, maxlength: 200 },
   line2: { type: String, trim: true, maxlength: 200 },
   city: { type: String, required: true, trim: true, maxlength: 100 },
-  state: { type: String, required: true, uppercase: true, trim: true, match: /^[A-Z]{2}$/ },
-  zip: { type: String, required: true, trim: true, match: /^\d{5}(-\d{4})?$/ },
-  country: { type: String, required: true, uppercase: true, trim: true, default: 'US' },
+  state: { type: String, trim: true, maxlength: 100, default: '' },
+  zip: { type: String, trim: true, maxlength: 12, default: '' },
+  country: {
+    type: String,
+    required: true,
+    uppercase: true,
+    trim: true,
+    match: /^[A-Z]{2}$/,
+    default: 'US',
+  },
   phone: { type: String, required: true, trim: true, maxlength: 20 },
 }
 

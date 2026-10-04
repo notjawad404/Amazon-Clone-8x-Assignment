@@ -44,3 +44,12 @@ export function calculateQuote({ items, deliveryMethod = 'standard', now = new D
     computedAt: now,
   }
 }
+
+export function deliveryOptions(subtotalCents, now = new Date()) {
+  return Object.entries(DELIVERY_METHODS).map(([method, { label, businessDays }]) => ({
+    method,
+    label,
+    priceCents: calculateShippingCents(subtotalCents, method),
+    estimatedDelivery: addBusinessDays(now, businessDays),
+  }))
+}

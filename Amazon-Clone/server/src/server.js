@@ -1,6 +1,7 @@
 import app from './app.js'
 import { connectDB } from './config/db.js'
 import { env } from './config/env.js'
+import { startExpiryJob } from './jobs/expirePendingOrders.js'
 import { logger } from './utils/logger.js'
 
 try {
@@ -17,4 +18,5 @@ app.listen(env.PORT, (err) => {
     process.exit(1)
   }
   logger.info(`API listening on http://localhost:${env.PORT}/api`)
+  startExpiryJob()
 })

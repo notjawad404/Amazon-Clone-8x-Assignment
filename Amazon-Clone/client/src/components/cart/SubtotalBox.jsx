@@ -46,7 +46,7 @@ function FreeShippingNote({ cart }) {
   )
 }
 
-export default function SubtotalBox({ cart, isUpdating = false }) {
+export default function SubtotalBox({ cart, isUpdating = false, onCheckout }) {
   const canCheckout = cart.itemCount > 0
 
   return (
@@ -54,7 +54,7 @@ export default function SubtotalBox({ cart, isUpdating = false }) {
       {canCheckout && <FreeShippingNote cart={cart} />}
       <SubtotalLine cart={cart} isUpdating={isUpdating} />
       {canCheckout ? (
-        <Link to="/checkout" className={buttonClasses('yellow', 'w-full')}>
+        <Link to="/checkout" onClick={onCheckout} className={buttonClasses('yellow', 'w-full')}>
           Proceed to checkout
         </Link>
       ) : (

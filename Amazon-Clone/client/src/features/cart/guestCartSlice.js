@@ -41,7 +41,7 @@ const findItem = (state, variantId) => state.items.find((item) => item.variantId
 // `maxQty` is the stock seen on the page; the server re-checks stock when the cart is loaded.
 const guestCartSlice = createSlice({
   name: 'guestCart',
-  initialState: () => ({ items: loadItems() }),
+  initialState: () => ({ items: loadItems(), isMerging: false }),
   reducers: {
     guestItemAdded: (state, { payload }) => {
       const { productId, variantId, qty, maxQty = MAX_CART_QTY, priceCents = null } = payload
@@ -73,13 +73,22 @@ const guestCartSlice = createSlice({
     guestCartReplaced: (state, { payload: items }) => {
       state.items = items
     },
+    guestMergeStatusChanged: (state, { payload: isMerging }) => {
+      state.isMerging = isMerging
+    },
   },
 })
 
-export const { guestItemAdded, guestItemUpdated, guestItemRemoved, guestCartReplaced } =
-  guestCartSlice.actions
+export const {
+  guestItemAdded,
+  guestItemUpdated,
+  guestItemRemoved,
+  guestCartReplaced,
+  guestMergeStatusChanged,
+} = guestCartSlice.actions
 
 export const selectGuestCartItems = (state) => state.guestCart.items
+export const selectIsMergingGuestCart = (state) => state.guestCart.isMerging
 
 export const isGuestCartAction = (action) => action.type.startsWith(`${guestCartSlice.name}/`)
 

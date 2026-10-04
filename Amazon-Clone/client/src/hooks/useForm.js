@@ -22,6 +22,19 @@ export function useForm(initialValues, validate) {
     validateField(name, values)
   }
 
+  // Sets several fields at once, e.g. clearing state and city when the country changes.
+  function setFieldValues(changes) {
+    const nextValues = { ...values, ...changes }
+    setValues(nextValues)
+    const touchedNames = Object.keys(changes).filter((name) => touched[name])
+    if (!touchedNames.length) return
+    const nextErrors = validate(nextValues)
+    setErrors((current) => ({
+      ...current,
+      ...Object.fromEntries(touchedNames.map((name) => [name, nextErrors[name]])),
+    }))
+  }
+
   function validateAll() {
     const nextErrors = validate(values)
     setErrors(nextErrors)
@@ -39,5 +52,5 @@ export function useForm(initialValues, validate) {
     }
   }
 
-  return { values, fieldProps, validateAll, setErrors }
+  return { values, fieldProps, setFieldValues, validateAll, setErrors }
 }

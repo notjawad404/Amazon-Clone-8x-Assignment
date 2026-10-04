@@ -7,6 +7,8 @@
     "seed": "node src/seed/seed.js",
     "seed:reset": "node src/seed/seed.js --reset",
     "seed:fetch": "node src/seed/fetchSource.js",
+    "seed:locations": "node src/seed/seedLocations.js",
+    "seed:locations:fetch": "node src/seed/fetchLocations.js",
     "catalog:resync": "node src/seed/resyncCatalog.js",
     "orders:advance": "node src/seed/advanceOrders.js",
     "check:services": "node src/scripts/checkServices.js",

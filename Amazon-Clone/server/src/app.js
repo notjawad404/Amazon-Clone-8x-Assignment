@@ -8,11 +8,13 @@ import { errorHandler } from './middleware/errorHandler.js'
 import { notFound } from './middleware/notFound.js'
 import { apiLimiter } from './middleware/rateLimit.js'
 import routes from './routes/index.js'
+import webhookRoutes from './routes/webhook.routes.js'
 
 const app = express()
 
 app.set('trust proxy', 1)
 app.use(helmet())
+app.use('/api/webhooks', webhookRoutes)
 app.use(express.json({ limit: '100kb' }))
 app.use(cookieParser())
 app.use(cors({ origin: env.CLIENT_URL, credentials: true }))
