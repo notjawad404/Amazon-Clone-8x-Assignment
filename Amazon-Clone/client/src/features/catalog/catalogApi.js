@@ -15,6 +15,16 @@ export const catalogApi = apiSlice.injectEndpoints({
     searchProducts: build.query({
       query: (params) => `/products?${toQueryString(params)}`,
     }),
+    getProduct: build.query({
+      query: (slug) => `/products/${slug}`,
+    }),
+    getReviews: build.query({
+      query: ({ slug, ...params }) => ({ url: `/products/${slug}/reviews`, params }),
+    }),
+    getRelated: build.query({
+      query: (slug) => `/products/${slug}/related`,
+      keepUnusedDataFor: CATALOG_CACHE_SECONDS,
+    }),
     getSuggestions: build.query({
       query: (params) => ({ url: '/products/suggestions', params }),
     }),
@@ -26,4 +36,7 @@ export const {
   useGetHomeQuery,
   useSearchProductsQuery,
   useGetSuggestionsQuery,
+  useGetProductQuery,
+  useGetReviewsQuery,
+  useGetRelatedQuery,
 } = catalogApi

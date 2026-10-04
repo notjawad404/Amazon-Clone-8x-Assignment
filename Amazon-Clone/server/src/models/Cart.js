@@ -30,7 +30,7 @@ const cartSchema = new Schema(
       ],
     },
   },
-  { timestamps: true },
+  { timestamps: true, optimisticConcurrency: true },
 )
 
 cartSchema.index({ user: 1 }, { unique: true })

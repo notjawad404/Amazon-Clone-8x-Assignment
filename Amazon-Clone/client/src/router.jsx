@@ -12,8 +12,6 @@ import AdminRoute from './routes/AdminRoute'
 import GuestOnlyRoute from './routes/GuestOnlyRoute'
 import ProtectedRoute from './routes/ProtectedRoute'
 
-const PUBLIC_PAGES = [{ path: '/p/:slug', title: 'Product' }]
-
 const PROTECTED_PAGES = [
   { path: '/checkout', title: 'Checkout', layout: 'checkout' },
   { path: '/order/:orderNumber/confirmation', title: 'Order confirmation' },
@@ -46,7 +44,10 @@ export const router = createBrowserRouter([
           { path: '/', element: <HomePage /> },
           { path: '/s', element: <SearchPage /> },
           { path: '/c/:slug', element: <SearchPage /> },
-          ...PUBLIC_PAGES.map(toPlaceholderRoute),
+          {
+            path: '/p/:slug',
+            lazy: async () => ({ Component: (await import('./pages/ProductPage')).default }),
+          },
           { path: '/cart', element: <CartPage /> },
           { element: <ProtectedRoute />, children: PROTECTED_PAGES.map(toPlaceholderRoute) },
           { element: <AdminRoute />, children: ADMIN_PAGES.map(toPlaceholderRoute) },

@@ -2,6 +2,7 @@ import { configureStore } from '@reduxjs/toolkit'
 import { apiSlice } from '../features/api/apiSlice'
 import authReducer from '../features/auth/authSlice'
 import guestCartReducer from '../features/cart/guestCartSlice'
+import checkoutReducer from '../features/checkout/checkoutSlice'
 import uiReducer from '../features/ui/uiSlice'
 import { listenerMiddleware } from './listenerMiddleware'
 
@@ -10,6 +11,7 @@ export const store = configureStore({
     [apiSlice.reducerPath]: apiSlice.reducer,
     auth: authReducer,
     guestCart: guestCartReducer,
+    checkout: checkoutReducer,
     ui: uiReducer,
   },
   middleware: (getDefaultMiddleware) =>

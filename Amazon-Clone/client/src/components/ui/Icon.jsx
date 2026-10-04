@@ -16,6 +16,10 @@ const PATHS = {
   ],
   user: ['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M4 20a8 8 0 0 1 16 0'],
   lock: ['M6 11h12v9H6z', 'M8.5 11V8a3.5 3.5 0 0 1 7 0v3'],
+  trash: ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M6 7l1 13h10l1-13', 'M9 7V4h6v3'],
+  plus: ['M12 5v14', 'M5 12h14'],
+  minus: ['M5 12h14'],
+  check: ['M5 12.5l4.5 4.5L19 7'],
 }
 
 export default function Icon({ name, className = 'size-5', strokeWidth = 2 }) {

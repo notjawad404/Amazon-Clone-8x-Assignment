@@ -8,7 +8,7 @@ import { buildSearchQuery, buildShopperFilter } from './search.service.js'
 
 const CATEGORY_FIELDS = 'name slug parent image sortOrder'
 
-const PRODUCT_CARD_PROJECTION = {
+export const PRODUCT_CARD_PROJECTION = {
   slug: 1,
   title: 1,
   brand: 1,

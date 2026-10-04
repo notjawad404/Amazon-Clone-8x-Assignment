@@ -65,10 +65,7 @@ function NoResults({ query, isFiltered, departments }) {
 }
 
 function categoryCrumbs({ department, category }) {
-  return [
-    { label: department.name, to: `/c/${department.slug}` },
-    { label: category.name, to: `/c/${category.slug}` },
-  ]
+  return [{ label: department.name, to: `/c/${department.slug}` }, { label: category.name }]
 }
 
 export default function SearchPage() {

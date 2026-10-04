@@ -346,7 +346,7 @@ A phase is only complete when all of these hold:
   - price
   - "FREE delivery {date}" or "$5.99 delivery"
   - stock message (In Stock / Only N left / Currently unavailable)
-  - `QtySelect` (1 to min(stock, 30))
+  - `QtyInput`: a numeric text field, 1 to min(stock, 30), with an inline message when the typed value is out of range
   - **Add to Cart** (yellow), **Buy Now** (orange)
   - "Ships from / Sold by" lines
   - Buttons are disabled when the variant is out of stock.
@@ -392,7 +392,7 @@ A phase is only complete when all of these hold:
 - Listener middleware: when the user signs in, merge the guest cart, then clear it.
 - `CartPage`:
   - "Shopping Cart" + "Price" column header
-  - `CartItem`: image, title link, variant label, stock line, `QtySelect` (choosing "0 (Delete)" removes the item), Delete | Save for later
+  - `CartItem`: image, title link, variant label, stock line, `QtyStepper` (trash/− · qty · +; at qty 1 the minus becomes Delete), Delete | Save for later
   - "Subtotal (N items): $X" under the list, and again in the right-hand `SubtotalBox`
   - "Proceed to checkout" (yellow) → `/checkout`. A guest is sent to `/signin?redirect=/checkout` first.
   - "Saved for later (N items)" section: Move to cart, Delete

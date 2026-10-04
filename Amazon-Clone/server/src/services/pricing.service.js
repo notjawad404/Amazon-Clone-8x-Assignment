@@ -10,9 +10,20 @@ export function calculateShippingCents(subtotalCents, deliveryMethod) {
   return DELIVERY_METHODS[deliveryMethod].priceCents
 }
 
+export function freeShippingRemainingCents(subtotalCents) {
+  return Math.max(FREE_SHIPPING_THRESHOLD_CENTS - subtotalCents, 0)
+}
+
+export function standardDelivery(subtotalCents, now = new Date()) {
+  return {
+    shippingCents: calculateShippingCents(subtotalCents, 'standard'),
+    estimatedDelivery: addBusinessDays(now, DELIVERY_METHODS.standard.businessDays),
+  }
+}
+
 export function freeDeliveryDate(subtotalCents, now = new Date()) {
-  if (calculateShippingCents(subtotalCents, 'standard') > 0) return null
-  return addBusinessDays(now, DELIVERY_METHODS.standard.businessDays)
+  const { shippingCents, estimatedDelivery } = standardDelivery(subtotalCents, now)
+  return shippingCents === 0 ? estimatedDelivery : null
 }
 
 export function calculateTaxCents(subtotalCents) {

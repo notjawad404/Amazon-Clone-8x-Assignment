@@ -5,10 +5,10 @@ export default function Breadcrumbs({ items, className = '' }) {
     <nav aria-label="Breadcrumb" className={className}>
       <ol className="flex flex-wrap items-center gap-x-2 text-xs text-gray-700">
         {items.map(({ label, to }, index) => {
-          const isCurrent = index === items.length - 1
+          const isLast = index === items.length - 1
           return (
-            <li key={to} className="flex items-center gap-2">
-              {isCurrent ? (
+            <li key={to ?? label} className="flex items-center gap-2">
+              {!to ? (
                 <span aria-current="page" className="text-ink">
                   {label}
                 </span>
@@ -20,7 +20,7 @@ export default function Breadcrumbs({ items, className = '' }) {
                   >
                     {label}
                   </Link>
-                  <span aria-hidden="true">›</span>
+                  {!isLast && <span aria-hidden="true">›</span>}
                 </>
               )}
             </li>

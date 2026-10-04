@@ -120,8 +120,11 @@ client/
     │   │   ├── ProductCard.jsx    # Listing card (image, title, rating, price, delivery)
     │   │   ├── ProductCardCompact.jsx
     │   │   ├── ImageGallery.jsx
+    │   │   ├── ImageLightbox.jsx  # Full-screen image modal with arrows
+    │   │   ├── ProductSummary.jsx # Title, brand link, rating, price, variants, bullets
     │   │   ├── VariantSelector.jsx
     │   │   ├── BuyBox.jsx         # Price, stock, delivery, qty, Add to Cart, Buy Now
+    │   │   ├── QtyInput.jsx       # Numeric quantity field, 1 to min(stock, 30)
     │   │   ├── AboutThisItem.jsx
     │   │   ├── ProductInfoTable.jsx
     │   │   ├── RatingHistogram.jsx
@@ -138,7 +141,8 @@ client/
     │   ├── cart/
     │   │   ├── CartItem.jsx
     │   │   ├── SavedItem.jsx
-    │   │   ├── QtySelect.jsx
+    │   │   ├── CartLineDetails.jsx # Image, title, stock, variant, price-changed notice
+    │   │   ├── QtyStepper.jsx     # Trash/− · qty · + (minus becomes Delete at 1)
     │   │   └── SubtotalBox.jsx
     │   ├── checkout/
     │   │   ├── AddressStep.jsx
@@ -183,6 +187,8 @@ client/
     │   ├── useAuth.js             # { user, isAuthenticated, isLoading }
     │   ├── useCart.js             # One interface over the guest cart and the server cart
     │   ├── useSearchParamsState.js# Read/write filter state in the URL
+    │   ├── useFocusTrap.js       # Focus trap, Esc, scroll lock for Modal and Drawer
+    │   ├── useLineAction.js      # Pending + error state for one cart line
     │   └── useDebounce.js
     │
     ├── utils/
@@ -332,10 +338,12 @@ server/
     │
     ├── services/                  # Business logic. No req/res
     │   ├── auth.service.js        # hash, verify, issue token
-    │   ├── catalog.service.js     # home rows, product by slug, reviews, related (active only)
+    │   ├── catalog.service.js     # category tree, home rows, search listing (active only)
+    │   ├── product.service.js     # product by slug, reviews, related (active only)
     │   ├── search.service.js      # params → { filter, sort, skip, limit }, facets
     │   ├── suggestion.service.js  # search-as-you-type: terms, categories, products
-    │   ├── cart.service.js        # add/update/remove/merge/hydrate/preview
+    │   ├── cart.service.js        # add/update/remove/merge/preview, removePurchasedItems
+    │   ├── cartView.service.js    # hydrate cart lines + subtotal summary
     │   ├── pricing.service.js     # subtotal, shipping, tax, total, delivery dates
     │   ├── checkout.service.js    # start, update, quote, place (txn → order + payment)
     │   ├── order.service.js       # status transitions, cancel, releaseStock, expireReservations
@@ -357,6 +365,7 @@ server/
     │   └── errorHandler.js        # ApiError / Zod / Mongoose / JWT → JSON response
     │
     ├── validators/                # Zod schemas, one file per resource
+    │   ├── common.js              # shared objectId helper
     │   ├── auth.schema.js
     │   ├── product.schema.js      # search query params
     │   ├── cart.schema.js

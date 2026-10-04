@@ -29,3 +29,6 @@ export const PRICE_RANGES = [
 export const RATING_FILTERS = [4, 3, 2, 1]
 export const BRAND_VISIBLE_COUNT = 8
 export const LOW_STOCK_THRESHOLD = 5
+export const MAX_CART_QTY = 30
+export const MAX_CART_ITEMS = 50
+export const SELLER_NAME = APP_NAME

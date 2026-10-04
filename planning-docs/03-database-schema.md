@@ -378,6 +378,8 @@ Reviews are read-only for shoppers in the MVP. Admins can delete a review, which
 
 The pair (`product`, `variantId`) is unique within a cart. When the API returns a cart, it fills in each item's current details from `products` and flags items that are archived, inactive, or out of stock.
 
+**Lifecycle.** A user has at most one cart document (unique `user`). It is created by the first add and updated in place on every change. It is **deleted when it becomes empty**: when the last item is removed, or when a paid order removes the purchased items and no saved-for-later items are left (`cart.service.removePurchasedItems`). The schema uses `optimisticConcurrency`, so two simultaneous writes (two tabs, a double click) are detected and retried on fresh data instead of one overwriting the other.
+
 ### 5.6 `checkouts`
 
 A checkout is the **server-side record of one checkout attempt**. It is created when the user opens `/checkout` and holds the items, the selected address and delivery method, and the latest price quote. When the user clicks "Place your order", the checkout becomes an order. The checkout's id also acts as the idempotency key: one checkout can produce at most one order.
@@ -522,7 +524,8 @@ This collection records every webhook event that Stripe sends, so that an event 
 | `products` | `{ status: 1, publishedAt: -1 }` | | New Arrivals, newest |
 | `products` | `{ brand: 1 }` | | Brand filter and facet |
 | `products` | `{ status: 1, updatedAt: -1 }` | | Admin product list |
-| `reviews` | `{ product: 1, createdAt: -1 }` | | Product reviews |
+| `reviews` | `{ product: 1, createdAt: -1 }` | | Product reviews, most recent |
+| `reviews` | `{ product: 1, rating: -1, createdAt: -1 }` | | Product reviews, top |
 | `reviews` | `{ product: 1, user: 1 }` | unique, partial (`user` exists) | One review per user (future) |
 | `carts` | `{ user: 1 }` | unique | |
 | `checkouts` | `{ user: 1, status: 1 }` | | Find the open checkout |
@@ -594,14 +597,18 @@ Response: `{ items, total, page, pages, facets: { brands: [{ name, count }] }, c
 - `products.findOne({ slug, status: "active" })` returns the whole page in one read. Only active variants are shown.
 - The selected variant is `?v=` if it is valid, otherwise the `isDefault` variant.
 - The stock message comes from `variant.stock`: 0 shows "Currently unavailable", 1–5 shows "Only N left in stock", and higher shows "In Stock".
-- Reviews come from a separate paginated query. The histogram uses `ratingBreakdown`. Related products: same `category`, sorted by `salesCount`.
+- Reviews come from a separate paginated query (10 per page). `sort=recent` is `{ createdAt: -1 }` and `sort=top` is `{ rating: -1, createdAt: -1 }` (there are no helpful votes yet). The histogram uses `ratingBreakdown`. Related products: same `category`, sorted by `salesCount`, max 8, returned as product cards.
+- A product in an inactive category returns 404, the same as a draft or archived product.
+- Response: the display fields plus `breadcrumbs: [department, category]`. Each active variant has `{ _id, label, priceCents, listPriceCents, discountPercent, stock, images, isDefault, delivery: { shippingCents, estimatedDelivery } }`. `delivery` comes from `pricing.service` (standard shipping for one unit), so the buy box shows "FREE delivery" or "$5.99 delivery" without repeating the rule. SKUs, `source`, and admin fields are not sent.
 
 ### 7.4 Cart
 
 - **Guest:** items are kept in localStorage. `POST /api/cart/preview` fills in their details without saving anything.
 - **Signed in:** `carts.findOne({ user })` + one `products.find({ _id: { $in } })` to fill in details.
 - **Add:** upsert. If the variant is already in the cart its `qty` is increased, capped at stock and 30.
-- **Merge on sign in:** each guest item is added with the same rule.
+- **Merge on sign in:** each guest item is added with the same rule. Guest items that are unavailable or out of stock are skipped, and saved-for-later guest items stay saved. The client empties the guest cart (and localStorage) before sending the merge, so the sign-in and session-restore events can't merge twice. If the merge fails, the guest items are put back.
+- **Response** (every cart endpoint, including preview): `{ items, count, itemCount, subtotalCents, listSubtotalCents, savingsCents, qualifiesForFreeShipping, freeShippingRemainingCents }`. `count` is the quantity of items not saved for later (the header badge). `itemCount`, `subtotalCents`, and `listSubtotalCents` (the subtotal at list prices, before discounts) only include items that can be bought now. Each line has `_id` (the item id, or the variant id for a guest preview), `title`, `slug`, `image`, `optionName`, `variantLabel`, `priceCents`, `listPriceCents`, `lineTotalCents` (price × qty), `listLineTotalCents` (list price × qty, or `lineTotalCents` when there is no discount), `addedPriceCents`, `stock`, `maxQty`, `qty`, `savedForLater`, and the flags `priceChanged`, `outOfStock`, and `unavailable`.
+- **Guests check out by signing in**, which merges their localStorage cart into the account cart and clears localStorage. The account cart is then cleaned up after payment as described in §5.5.
 
 ### 7.5 Checkout and Stripe payment
 

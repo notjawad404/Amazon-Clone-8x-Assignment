@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  REVIEW_SORTS,
   SEARCH_MAX_BRANDS,
   SEARCH_MAX_PAGE_SIZE,
   SEARCH_MAX_PRICE_DOLLARS,
@@ -51,6 +52,22 @@ export const searchQuerySchema = z
       minPrice === undefined || maxPrice === undefined || minPrice <= maxPrice,
     { message: 'Min price must not be more than max price', path: ['maxPrice'] },
   )
+
+export const productParamsSchema = z.strictObject({
+  slug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9-]+$/, 'Invalid product')
+    .max(200),
+})
+
+export const reviewsQuerySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).default(1),
+  sort: z.enum(REVIEW_SORTS).default('recent'),
+})
+
+export const emptyQuerySchema = z.strictObject({})
 
 export const suggestionsQuerySchema = z.strictObject({
   q: query.min(1, 'Enter a search term'),

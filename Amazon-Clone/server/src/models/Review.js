@@ -15,6 +15,7 @@ const reviewSchema = new Schema(
 )
 
 reviewSchema.index({ product: 1, createdAt: -1 })
+reviewSchema.index({ product: 1, rating: -1, createdAt: -1 })
 reviewSchema.index(
   { product: 1, user: 1 },
   { unique: true, partialFilterExpression: { user: { $type: 'objectId' } } },
