@@ -5,10 +5,14 @@ import { env } from './env.js'
 mongoose.set('strictQuery', true)
 mongoose.set('sanitizeFilter', true)
 
+let hasConnected = false
 let isClosing = false
 
+mongoose.connection.on('connected', () => {
+  hasConnected = true
+})
 mongoose.connection.on('disconnected', () => {
-  if (!isClosing) logger.warn('MongoDB disconnected')
+  if (hasConnected && !isClosing) logger.warn('MongoDB disconnected')
 })
 mongoose.connection.on('reconnected', () => logger.info('MongoDB reconnected'))
 

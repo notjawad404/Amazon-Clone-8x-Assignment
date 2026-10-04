@@ -7,7 +7,7 @@ An Amazon-style store built with MongoDB, Express, React and Node.
 
 ## Prerequisites
 
-- Node.js 20.6+ and npm
+- Node.js 22.17+ and npm
 - A MongoDB Atlas cluster (the free M0 tier works)
 - A Stripe account in test mode, plus the [Stripe CLI](https://docs.stripe.com/stripe-cli)
 - A Cloudinary account (free tier)

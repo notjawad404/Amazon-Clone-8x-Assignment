@@ -1,5 +1,5 @@
 import { MongoMemoryReplSet } from 'mongodb-memory-server'
-import { afterAll, beforeAll } from 'vitest'
+import { afterAll, afterEach, beforeAll } from 'vitest'
 
 const replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } })
 
@@ -15,9 +15,15 @@ Object.assign(process.env, {
 })
 
 const { connectDB, disconnectDB } = await import('../config/db.js')
+const { default: mongoose } = await import('mongoose')
 
 beforeAll(async () => {
   await connectDB()
+})
+
+afterEach(async () => {
+  const collections = await mongoose.connection.db.collections()
+  await Promise.all(collections.map((collection) => collection.deleteMany({})))
 })
 
 afterAll(async () => {
