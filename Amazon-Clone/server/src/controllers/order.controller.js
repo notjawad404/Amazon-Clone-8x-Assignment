@@ -2,6 +2,10 @@ import * as orderService from '../services/order.service.js'
 import * as paymentService from '../services/payment.service.js'
 import { ApiError } from '../utils/ApiError.js'
 
+export async function getOrder(req, res) {
+  res.json(await orderService.getOrderDetails(req.user._id, req.params.orderNumber))
+}
+
 export async function getPaymentIntent(req, res) {
   const order = await orderService.findUserOrder(req.user._id, req.params.orderNumber)
   if (order.status !== 'pending_payment') {

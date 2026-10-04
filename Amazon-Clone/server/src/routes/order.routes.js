@@ -8,6 +8,11 @@ import { orderParamsSchema } from '../validators/order.schema.js'
 const router = Router()
 
 router.use(protect)
+router.get(
+  '/:orderNumber',
+  validate({ params: orderParamsSchema }),
+  asyncHandler(orderController.getOrder),
+)
 router.post(
   '/:orderNumber/payment-intent',
   validate({ params: orderParamsSchema }),

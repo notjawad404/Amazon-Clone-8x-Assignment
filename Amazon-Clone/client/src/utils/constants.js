@@ -34,3 +34,5 @@ export const MAX_CART_ITEMS = 50
 export const SELLER_NAME = APP_NAME
 export const CHECKOUT_STORAGE_KEY = 'checkout'
 export const LOCATIONS_CACHE_SECONDS = 3600
+export const ORDER_POLL_INTERVAL_MS = 2000
+export const ORDER_CONFIRM_TIMEOUT_MS = 20_000

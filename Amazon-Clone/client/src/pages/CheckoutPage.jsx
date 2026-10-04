@@ -1,5 +1,4 @@
 import { Elements } from '@stripe/react-stripe-js'
-import { loadStripe } from '@stripe/stripe-js'
 import { useEffect } from 'react'
 import { useDispatch } from 'react-redux'
 import { Link, Navigate } from 'react-router-dom'
@@ -12,9 +11,7 @@ import { checkoutFinished } from '../features/checkout/checkoutSlice'
 import { useCheckoutSession } from '../hooks/useCheckoutSession'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { parseApiError } from '../utils/apiError'
-
-// Loaded only with this page's chunk, so Stripe.js isn't fetched on other pages.
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY)
+import { stripePromise } from '../utils/stripe'
 
 function CheckoutSkeleton() {
   return (

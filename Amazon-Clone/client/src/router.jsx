@@ -13,7 +13,6 @@ import GuestOnlyRoute from './routes/GuestOnlyRoute'
 import ProtectedRoute from './routes/ProtectedRoute'
 
 const PROTECTED_PAGES = [
-  { path: '/order/:orderNumber/confirmation', title: 'Order confirmation' },
   { path: '/account', title: 'Your Account' },
   { path: '/account/addresses', title: 'Your Addresses' },
   { path: '/orders', title: 'Your Orders' },
@@ -55,6 +54,12 @@ export const router = createBrowserRouter([
                 path: '/checkout',
                 handle: { layout: 'checkout' },
                 lazy: async () => ({ Component: (await import('./pages/CheckoutPage')).default }),
+              },
+              {
+                path: '/order/:orderNumber/confirmation',
+                lazy: async () => ({
+                  Component: (await import('./pages/OrderConfirmationPage')).default,
+                }),
               },
               ...PROTECTED_PAGES.map(toPlaceholderRoute),
             ],

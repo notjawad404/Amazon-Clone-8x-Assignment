@@ -1,8 +1,8 @@
 import mongoose from 'mongoose'
 import { env } from '../config/env.js'
-import { Checkout, Order } from '../models/index.js'
+import { Checkout, Order, Payment, Product } from '../models/index.js'
 import { ApiError } from '../utils/ApiError.js'
-import { CURRENCY, ORDER_NUMBER_ATTEMPTS } from '../utils/constants.js'
+import { CURRENCY, DELIVERY_METHODS, ORDER_NUMBER_ATTEMPTS } from '../utils/constants.js'
 import { addMinutes } from '../utils/dates.js'
 import { generateOrderNumber } from '../utils/orderNumber.js'
 import { reserveStock } from './inventory.service.js'
@@ -86,4 +86,65 @@ export async function findUserOrder(userId, orderNumber) {
   const order = await Order.findOne({ orderNumber, user: userId })
   if (!order) throw new ApiError(404, 'Order not found', { code: 'order_not_found' })
   return order
+}
+
+function toPaymentSummary(payment) {
+  if (!payment) return null
+  return {
+    status: payment.status,
+    failedAttempts: payment.failedAttempts,
+    lastError: payment.lastError ? { message: payment.lastError.message } : null,
+    card: payment.card ? { brand: payment.card.brand, last4: payment.card.last4 } : null,
+    receiptUrl: payment.receiptUrl,
+    amountRefundedCents: payment.amountRefundedCents,
+  }
+}
+
+/** The order as its owner sees it: snapshot items with product links, totals, and payment. */
+export async function getOrderDetails(userId, orderNumber) {
+  const order = await Order.findOne({ orderNumber, user: userId }).lean()
+  if (!order) throw new ApiError(404, 'Order not found', { code: 'order_not_found' })
+
+  const productIds = [...new Set(order.items.map((item) => String(item.product)))]
+  const [products, payment] = await Promise.all([
+    Product.find({ _id: mongoose.trusted({ $in: productIds }), status: 'active' })
+      .select('slug')
+      .lean(),
+    Payment.findOne({ order: order._id }).lean(),
+  ])
+  const slugs = new Map(products.map((product) => [String(product._id), product.slug]))
+
+  return {
+    orderNumber: order.orderNumber,
+    status: order.status,
+    paymentStatus: order.paymentStatus,
+    source: order.source,
+    placedAt: order.createdAt,
+    paidAt: order.paidAt,
+    cancelledAt: order.cancelledAt,
+    cancelReason: order.cancelReason,
+    reservationExpiresAt: order.reservationExpiresAt,
+    items: order.items.map((item) => ({
+      productId: item.product,
+      variantId: item.variantId,
+      slug: slugs.get(String(item.product)) ?? null,
+      title: item.title,
+      variantLabel: item.variantLabel,
+      image: item.image,
+      qty: item.qty,
+      unitPriceCents: item.unitPriceCents,
+      lineTotalCents: item.lineTotalCents,
+    })),
+    shippingAddress: order.shippingAddress,
+    deliveryMethod: order.deliveryMethod,
+    deliveryLabel: DELIVERY_METHODS[order.deliveryMethod].label,
+    estimatedDelivery: order.estimatedDelivery,
+    subtotalCents: order.subtotalCents,
+    shippingCents: order.shippingCents,
+    taxCents: order.taxCents,
+    totalCents: order.totalCents,
+    currency: order.currency,
+    paymentMethod: order.paymentMethod,
+    payment: toPaymentSummary(payment),
+  }
 }

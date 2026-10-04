@@ -30,7 +30,7 @@ export function usePlaceOrder(checkout) {
   function finish(orderNumber) {
     dispatch(checkoutFinished())
     dispatch(apiSlice.util.invalidateTags(['Cart']))
-    navigate(`/order/${orderNumber}/confirmation`, { replace: true })
+    navigate(`/order/${orderNumber}/confirmation`, { replace: true, state: { justPaid: true } })
   }
 
   function fetchPayment() {

@@ -685,7 +685,11 @@ Client                          API                                   MongoDB   
 
 ### 7.6 Order confirmation
 
-`orders.findOne({ orderNumber, user })`. The page polls every 2 s, for up to 20 s, until the order is `paid`. If `payment.lastError` is set, it shows the error and offers a retry.
+`orders.findOne({ orderNumber, user })` (404 for anyone else) + `payments.findOne({ order })` + one `products.find({ _id: { $in } })` for product links. The page polls every 2 s, for up to 20 s, until the order is `paid`. If `payment.lastError` is set, it shows the error and offers a retry.
+
+- Response: `{ orderNumber, status, paymentStatus, source, placedAt, paidAt, cancelledAt, cancelReason, reservationExpiresAt, items: [{ productId, variantId, slug, title, variantLabel, image, qty, unitPriceCents, lineTotalCents }], shippingAddress, deliveryMethod, deliveryLabel, estimatedDelivery, subtotalCents, shippingCents, taxCents, totalCents, currency, paymentMethod, payment }`. `slug` is `null` when the product is no longer active.
+- `payment` is a summary only: `{ status, failedAttempts, lastError: { message } | null, card: { brand, last4 } | null, receiptUrl, amountRefundedCents }`. The PaymentIntent id, charge id, event ids, and decline codes are never sent.
+- An earlier decline stays in `lastError` after a later card succeeds, until the success webhook marks the order paid. The page therefore shows an error only for a failure newer than the last submitted payment (it compares `failedAttempts`).
 
 ### 7.7 Account and orders
 

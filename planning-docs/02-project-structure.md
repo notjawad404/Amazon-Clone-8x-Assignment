@@ -158,6 +158,12 @@ client/
     │   │   ├── RegionFields.jsx   # Country → state/province → city (suggestions)
     │   │   └── AddressCard.jsx
     │   ├── orders/
+    │   │   ├── OrderPlaced.jsx    # Confirmation: thanks, arrival, address, payment, items, totals
+    │   │   ├── PaymentPending.jsx # Confirming… / still confirming / payment failed
+    │   │   ├── RetryPayment.jsx   # Card form that pays the order’s existing PaymentIntent
+    │   │   ├── OrderCancelled.jsx
+    │   │   ├── OrderItems.jsx
+    │   │   ├── OrderTotals.jsx
     │   │   ├── OrderCard.jsx
     │   │   ├── OrderTimeline.jsx
     │   │   └── StatusBadge.jsx
@@ -195,6 +201,7 @@ client/
     │   ├── useLineAction.js      # Pending + error state for one cart line
     │   ├── useCheckoutSession.js # restore (reload) or start a checkout; waits for guest-cart merge
     │   ├── usePlaceOrder.js      # place → confirmCardPayment → confirmation; retries reuse the PI
+    │   ├── useOrderConfirmation.js # poll while pending (2 s, 20 s cap), pick the view to show
     │   └── useDebounce.js
     │
     ├── utils/
