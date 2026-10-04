@@ -1,0 +1,7 @@
+import * as catalogService from '../services/catalog.service.js'
+import { CATALOG_CACHE_CONTROL } from '../utils/constants.js'
+
+export async function getHome(req, res) {
+  const home = await catalogService.getHome()
+  res.set('Cache-Control', CATALOG_CACHE_CONTROL).json(home)
+}

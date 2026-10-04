@@ -9,7 +9,7 @@ export default function Alert({ title, variant = 'error', className = '', childr
   return (
     <div
       role="alert"
-      className={`flex gap-3 rounded-lg border-2 px-4 py-3 text-sm${styles.box} ${className}`}
+      className={`flex gap-3 rounded-lg border-2 px-4 py-3 text-sm ${styles.box} ${className}`}
     >
       <span
         aria-hidden="true"

@@ -6,6 +6,7 @@ import {
   MAX_VARIANTS,
   PRODUCT_STATUSES,
 } from '../utils/constants.js'
+import { discountPercent } from '../utils/money.js'
 import { statsFromBreakdown } from '../utils/ratings.js'
 import { toSlug, withSuffix } from '../utils/slug.js'
 import { externalIdIndex, imageSchema, integer, maxItems, sourceSchema } from './shared.js'
@@ -96,7 +97,9 @@ productSchema.index(
 productSchema.index({ category: 1, status: 1, minPriceCents: 1 })
 productSchema.index({ department: 1, status: 1, minPriceCents: 1 })
 productSchema.index({ category: 1, status: 1, ratingAvg: -1 })
+productSchema.index({ department: 1, status: 1, ratingAvg: -1 })
 productSchema.index({ status: 1, salesCount: -1 })
+productSchema.index({ status: 1, maxDiscountPercent: -1 })
 productSchema.index({ status: 1, publishedAt: -1 })
 productSchema.index({ brand: 1 })
 productSchema.index({ status: 1, updatedAt: -1 })
@@ -105,7 +108,7 @@ export function calculateDerivedFields(variants) {
   const active = variants.filter((variant) => variant.isActive)
   const prices = active.map((variant) => variant.priceCents)
   const discounts = active.map(({ priceCents, listPriceCents }) =>
-    listPriceCents > priceCents ? Math.round((1 - priceCents / listPriceCents) * 100) : 0,
+    discountPercent(priceCents, listPriceCents),
   )
   const totalStock = active.reduce((sum, variant) => sum + variant.stock, 0)
 

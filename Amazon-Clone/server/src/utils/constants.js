@@ -11,6 +11,10 @@ export const MAX_TAGS = 20
 export const PRODUCT_STATUSES = ['draft', 'active', 'archived']
 export const SOURCE_PROVIDERS = ['dummyjson', 'manual']
 
+export const HOME_ROW_LIMIT = 12
+export const DEAL_MIN_DISCOUNT_PERCENT = 10
+export const CATALOG_CACHE_CONTROL = 'public, max-age=300'
+
 export const DELIVERY_METHODS = {
   standard: { label: 'Standard', priceCents: 599, businessDays: 5 },
   expedited: { label: 'Expedited', priceCents: 999, businessDays: 2 },

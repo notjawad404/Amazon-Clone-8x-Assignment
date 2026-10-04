@@ -3,6 +3,7 @@ import App from './App'
 import AuthLayout from './components/layout/AuthLayout'
 import Layout from './components/layout/Layout'
 import CartPage from './pages/CartPage'
+import HomePage from './pages/HomePage'
 import NotFoundPage from './pages/NotFoundPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import SignInPage from './pages/SignInPage'
@@ -12,7 +13,6 @@ import GuestOnlyRoute from './routes/GuestOnlyRoute'
 import ProtectedRoute from './routes/ProtectedRoute'
 
 const PUBLIC_PAGES = [
-  { path: '/', title: 'Home' },
   { path: '/s', title: 'Search results' },
   { path: '/c/:slug', title: 'Category' },
   { path: '/p/:slug', title: 'Product' },
@@ -46,6 +46,7 @@ export const router = createBrowserRouter([
       {
         element: <Layout />,
         children: [
+          { path: '/', element: <HomePage /> },
           ...PUBLIC_PAGES.map(toPlaceholderRoute),
           { path: '/cart', element: <CartPage /> },
           { element: <ProtectedRoute />, children: PROTECTED_PAGES.map(toPlaceholderRoute) },

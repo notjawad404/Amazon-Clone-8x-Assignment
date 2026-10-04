@@ -16,6 +16,12 @@
   --color-ink: #0f1111;
   --color-focus: #e77600;
   --color-error: #c40000;
+  --color-page: #e3e6e6;
+  --color-deal: #cc0c39;
+  --color-promo: #1a5cff;
+  --color-star: #de7921;
+
+  --container-page: 1500px;
 }
 
 @layer base {
