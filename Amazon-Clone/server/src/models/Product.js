@@ -1,5 +1,6 @@
 import mongoose, { Schema } from 'mongoose'
 import {
+  DEFAULT_BRAND,
   MAX_BULLETS,
   MAX_IMAGES,
   MAX_TAGS,
@@ -37,7 +38,7 @@ const productSchema = new Schema(
   {
     title: { type: String, required: true, trim: true, minlength: 3, maxlength: 200 },
     slug: { type: String, required: true, lowercase: true, trim: true, match: /^[a-z0-9-]+$/ },
-    brand: { type: String, required: true, trim: true, maxlength: 100, default: 'Generic' },
+    brand: { type: String, required: true, trim: true, maxlength: 100, default: DEFAULT_BRAND },
     department: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
     category: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
     description: { type: String, required: true, trim: true, maxlength: 5000 },

@@ -212,7 +212,7 @@ Commit only the `.env.example` files. The `.env` files are listed in `.gitignore
 
 ### Prerequisites
 
-- Node.js 20+ and npm
+- Node.js 22.17+ and npm
 - A MongoDB Atlas account (free M0 cluster)
 - A Stripe account (test mode) and the [Stripe CLI](https://docs.stripe.com/stripe-cli)
 - A Cloudinary account (free tier)
@@ -236,7 +236,7 @@ cd ..
 mkdir server && cd server
 npm init -y
 npm install express mongoose dotenv cookie-parser cors helmet morgan jsonwebtoken bcryptjs zod stripe cloudinary multer express-rate-limit slugify
-npm install -D nodemon @faker-js/faker
+npm install -D @faker-js/faker vitest supertest mongodb-memory-server
 cd ..
 ```
 
@@ -278,7 +278,7 @@ export default defineConfig({
 `server/package.json`
 ```json
 "scripts": {
-  "dev": "nodemon src/server.js",
+  "dev": "node --watch src/server.js",
   "start": "node src/server.js",
   "seed": "node src/seed/seed.js",
   "seed:reset": "node src/seed/seed.js --reset",

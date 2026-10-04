@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, ScrollRestoration } from 'react-router-dom'
 import Spinner from './components/ui/Spinner'
 import { useGetMeQuery } from './features/auth/authApi'
 import { useAuth } from './hooks/useAuth'
@@ -18,5 +18,10 @@ export default function App() {
       </div>
     )
   }
-  return <Outlet />
+  return (
+    <>
+      <ScrollRestoration />
+      <Outlet />
+    </>
+  )
 }

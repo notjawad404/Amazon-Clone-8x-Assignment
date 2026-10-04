@@ -97,11 +97,13 @@ client/
     │
     ├── components/
     │   ├── layout/
-    │   │   ├── Layout.jsx         # Header + SubNav + <Outlet> + Footer + CategorySidebar
+    │   │   ├── Layout.jsx         # Picks full / minimal / checkout chrome from the route's handle.layout
     │   │   ├── Header.jsx
     │   │   ├── NavLogo.jsx
     │   │   ├── DeliverTo.jsx      # "Deliver to {name} {city}" from the default address
-    │   │   ├── SearchBar.jsx      # Department <select> + input + submit
+    │   │   ├── SearchBar.jsx      # Department <select> + input + submit, autocomplete combobox
+    │   │   ├── DepartmentSelect.jsx
+    │   │   ├── SearchSuggestions.jsx # Suggestion dropdown (terms, departments, products)
     │   │   ├── AccountMenu.jsx    # "Hello, sign in / Account & Lists" hover dropdown
     │   │   ├── OrdersLink.jsx     # "Returns & Orders"
     │   │   ├── CartIcon.jsx       # Count badge (guest or server cart)
@@ -236,7 +238,7 @@ Pages are lazy loaded (`React.lazy`), apart from Home and Search. The admin page
 ```js
 {
   api: { /* RTK Query cache */ },
-  auth:      { user: { _id, name, email, role } | null, status: 'idle' | 'authenticated' | 'guest' },
+  auth:      { user: { _id, name, email, role, deliveryLocation: { city, zip } | null } | null, status: 'idle' | 'authenticated' | 'guest' },
   guestCart: { items: [{ productId, variantId, qty, savedForLater }] },   // persisted to localStorage
   checkout:  { checkoutId: string | null, buyNowItem: { productId, variantId, qty } | null },
   ui:        { sidebarOpen: false, toasts: [] }
@@ -332,6 +334,7 @@ server/
     │   ├── auth.service.js        # hash, verify, issue token
     │   ├── catalog.service.js     # home rows, product by slug, reviews, related (active only)
     │   ├── search.service.js      # params → { filter, sort, skip, limit }, facets
+    │   ├── suggestion.service.js  # search-as-you-type: terms, categories, products
     │   ├── cart.service.js        # add/update/remove/merge/hydrate/preview
     │   ├── pricing.service.js     # subtotal, shipping, tax, total, delivery dates
     │   ├── checkout.service.js    # start, update, quote, place (txn → order + payment)
@@ -442,7 +445,7 @@ app.use(errorHandler)
 | `health` | `GET /health` | – |
 | `auth` | `POST /auth/signup`, `POST /auth/signin`, `POST /auth/signout`, `GET /auth/me` | `me`: protect |
 | `category` | `GET /categories` | – |
-| `product` | `GET /products`, `GET /products/home`, `GET /products/:slug`, `GET /products/:slug/reviews`, `GET /products/:slug/related` | – |
+| `product` | `GET /products`, `GET /products/home`, `GET /products/suggestions`, `GET /products/:slug`, `GET /products/:slug/reviews`, `GET /products/:slug/related` | – |
 | `cart` | `GET /cart`, `POST /cart/items`, `PATCH /cart/items/:itemId`, `DELETE /cart/items/:itemId`, `POST /cart/merge`, `POST /cart/preview` | protect (except `preview`) |
 | `checkout` | `POST /checkout` (start: `{ source, item? }`), `GET /checkout/:id`, `PATCH /checkout/:id` (`{ addressId?, deliveryMethod? }`), `POST /checkout/:id/place` (`{ expectedTotalCents }` → `{ orderNumber, clientSecret }`) | protect, owner only |
 | `address` | `GET/POST /users/me/addresses`, `PATCH/DELETE /users/me/addresses/:id`, `POST /users/me/addresses/:id/default` | protect |
@@ -459,7 +462,7 @@ The admin product endpoints return every product with every field, including dra
 
 - Success responses return the resource directly (`{ ...product }`) or a list wrapper (`{ items, total, page, pages }`).
 - Error responses have the shape `{ message, details? }`:
-  - `400` validation (`details` = Zod issues)
+  - `400` validation (`details` = `[{ path, message }]`, one entry per invalid field)
   - `401` not signed in
   - `403` not allowed
   - `404` not found
@@ -472,7 +475,7 @@ The admin product endpoints return every product with every field, including dra
 
 | Script | Command |
 |---|---|
-| `dev` | `nodemon src/server.js` |
+| `dev` | `node --watch src/server.js` |
 | `start` | `node src/server.js` |
 | `seed` | `node src/seed/seed.js` |
 | `seed:reset` | `node src/seed/seed.js --reset` (development only. Wipes all data, including admin edits) |

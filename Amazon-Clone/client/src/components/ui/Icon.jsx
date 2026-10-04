@@ -1,4 +1,5 @@
 const PATHS = {
+  search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'M20 20l-4-4'],
   menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
   close: ['M6 6l12 12', 'M18 6 6 18'],
   'chevron-left': ['M15 6l-6 6 6 6'],

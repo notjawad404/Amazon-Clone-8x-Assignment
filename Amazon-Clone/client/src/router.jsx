@@ -5,17 +5,14 @@ import CartPage from './pages/CartPage'
 import HomePage from './pages/HomePage'
 import NotFoundPage from './pages/NotFoundPage'
 import PlaceholderPage from './pages/PlaceholderPage'
+import SearchPage from './pages/SearchPage'
 import SignInPage from './pages/SignInPage'
 import SignUpPage from './pages/SignUpPage'
 import AdminRoute from './routes/AdminRoute'
 import GuestOnlyRoute from './routes/GuestOnlyRoute'
 import ProtectedRoute from './routes/ProtectedRoute'
 
-const PUBLIC_PAGES = [
-  { path: '/s', title: 'Search results' },
-  { path: '/c/:slug', title: 'Category' },
-  { path: '/p/:slug', title: 'Product' },
-]
+const PUBLIC_PAGES = [{ path: '/p/:slug', title: 'Product' }]
 
 const PROTECTED_PAGES = [
   { path: '/checkout', title: 'Checkout', layout: 'checkout' },
@@ -47,6 +44,8 @@ export const router = createBrowserRouter([
         element: <Layout />,
         children: [
           { path: '/', element: <HomePage /> },
+          { path: '/s', element: <SearchPage /> },
+          { path: '/c/:slug', element: <SearchPage /> },
           ...PUBLIC_PAGES.map(toPlaceholderRoute),
           { path: '/cart', element: <CartPage /> },
           { element: <ProtectedRoute />, children: PROTECTED_PAGES.map(toPlaceholderRoute) },

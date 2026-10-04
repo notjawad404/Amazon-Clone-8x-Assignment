@@ -1,7 +1,9 @@
 import mongoose from 'mongoose'
 import { Category, Product } from '../models/index.js'
+import { ApiError } from '../utils/ApiError.js'
 import { DEAL_MIN_DISCOUNT_PERCENT, HOME_ROW_LIMIT } from '../utils/constants.js'
 import { discountPercent } from '../utils/money.js'
+import { buildSearchQuery, buildShopperFilter } from './search.service.js'
 
 const CATEGORY_FIELDS = 'name slug parent image sortOrder'
 
@@ -19,7 +21,7 @@ const PRODUCT_CARD_PROJECTION = {
   'variants.isActive': 1,
 }
 
-function toImage(image) {
+export function toImage(image) {
   return image ? { url: image.url, alt: image.alt ?? '' } : null
 }
 
@@ -51,7 +53,7 @@ export function toProductCard(product) {
 }
 
 // A category is visible only when it and its department are both active.
-async function getVisibleTree() {
+export async function getVisibleTree() {
   const categories = await Category.find({ isActive: true })
     .sort({ level: 1, sortOrder: 1, name: 1 })
     .select(CATEGORY_FIELDS)
@@ -69,6 +71,29 @@ async function getVisibleTree() {
     departmentsById.get(String(category.parent))?.children.push(toCategoryNode(category))
   }
   return departments
+}
+
+export function visibleCategoryIds(departments) {
+  return departments.flatMap((department) => department.children.map((category) => category._id))
+}
+
+// Returns the department (level 0) or category (level 1) for a slug, or null if it isn't visible.
+export function findScope(departments, slug) {
+  for (const department of departments) {
+    const { _id, name } = department
+    if (department.slug === slug) return { _id, name, slug, level: 0, department: null }
+    const category = department.children.find((child) => child.slug === slug)
+    if (category) {
+      return {
+        _id: category._id,
+        name: category.name,
+        slug,
+        level: 1,
+        department: { _id, name, slug: department.slug },
+      }
+    }
+  }
+  return null
 }
 
 async function bestSellerImagesByCategory() {
@@ -106,13 +131,7 @@ async function findProductCards(filter, sort) {
 
 export async function getHome() {
   const departments = (await getVisibleTree()).filter((department) => department.children.length)
-  const visibleCategoryIds = departments.flatMap((department) =>
-    department.children.map((category) => category._id),
-  )
-  const shopperFilter = {
-    status: 'active',
-    category: mongoose.trusted({ $in: visibleCategoryIds }),
-  }
+  const shopperFilter = buildShopperFilter({ visibleCategoryIds: visibleCategoryIds(departments) })
 
   const [bestSellers, newArrivals, deals, topRatedRows] = await Promise.all([
     findProductCards(shopperFilter, { salesCount: -1 }),
@@ -140,5 +159,36 @@ export async function getHome() {
     newArrivals,
     deals,
     topRated: topRatedRows.filter((row) => row.products.length),
+  }
+}
+
+export async function searchProducts({ q, category, page, limit }) {
+  const departments = await getVisibleTree()
+  const scope = category ? findScope(departments, category) : null
+  if (category && !scope) {
+    throw new ApiError(404, 'Category not found', { code: 'category_not_found' })
+  }
+
+  const { filter, sort, projection } = buildSearchQuery({
+    q,
+    scope,
+    visibleCategoryIds: visibleCategoryIds(departments),
+  })
+  const [products, total] = await Promise.all([
+    Product.find(filter)
+      .select({ ...PRODUCT_CARD_PROJECTION, ...projection })
+      .sort(sort)
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Product.countDocuments(filter),
+  ])
+
+  return {
+    items: products.map(toProductCard),
+    total,
+    page,
+    pages: Math.ceil(total / limit),
+    category: scope,
   }
 }

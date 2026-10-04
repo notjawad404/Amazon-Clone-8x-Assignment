@@ -1,4 +1,4 @@
-import { MAX_BULLETS, MAX_TAGS } from '../utils/constants.js'
+import { DEFAULT_BRAND, MAX_BULLETS, MAX_TAGS } from '../utils/constants.js'
 import { toSlug, withSuffix } from '../utils/slug.js'
 
 const MIN_LIST_PRICE_DISCOUNT = 5
@@ -48,7 +48,7 @@ export function transformProduct(source, { categoryId, usedSlugs, importedAt }) 
     product: {
       title: source.title.trim(),
       slug,
-      brand: source.brand?.trim() || 'Generic',
+      brand: source.brand?.trim() || DEFAULT_BRAND,
       category: categoryId,
       description: source.description.trim(),
       bullets: buildBullets(source),

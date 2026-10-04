@@ -237,6 +237,7 @@ export async function addItem(req, res) {
 
 - **Schemas are strict** (the default) and have `timestamps: true`. Every field has a type, plus `required`, `min`/`max`, `enum`, or `match` where they apply.
 - Turn on `mongoose.set('sanitizeFilter', true)` and `mongoose.set('strictQuery', true)`. Together with Zod, these block NoSQL injection (`{ "$gt": "" }` in a filter).
+- With `sanitizeFilter` on, query operators written by server code must be wrapped in `mongoose.trusted()`: `{ priceCents: mongoose.trusted({ $gte: min }) }`. Never wrap a value that came from the request.
 - **Every query has a supporting index.** When you add a query, check the index list in [03-database-schema.md §6](03-database-schema.md#6-indexes). Use `.explain()` if you're unsure.
 - **Reads that only display data** use `.lean()` and a projection:
   ```js

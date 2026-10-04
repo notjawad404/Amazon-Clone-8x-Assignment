@@ -8,12 +8,23 @@ export const MAX_IMAGES = 10
 export const MAX_BULLETS = 10
 export const MAX_TAGS = 20
 
+export const DEFAULT_BRAND = 'Generic'
 export const PRODUCT_STATUSES = ['draft', 'active', 'archived']
 export const SOURCE_PROVIDERS = ['dummyjson', 'manual']
 
 export const HOME_ROW_LIMIT = 12
 export const DEAL_MIN_DISCOUNT_PERCENT = 10
 export const CATALOG_CACHE_CONTROL = 'public, max-age=300'
+
+export const SEARCH_PAGE_SIZE = 24
+export const SEARCH_MAX_PAGE_SIZE = 48
+export const SEARCH_QUERY_MAX_LENGTH = 100
+export const SUGGESTION_SCAN_LIMIT = 20
+export const SUGGESTION_PRODUCT_LIMIT = 5
+export const SUGGESTION_TERM_LIMIT = 6
+export const SUGGESTION_TERM_MAX_WORDS = 3
+export const SUGGESTION_CATEGORY_LIMIT = 4
+export const SUGGESTIONS_CACHE_CONTROL = 'public, max-age=60'
 
 export const DELIVERY_METHODS = {
   standard: { label: 'Standard', priceCents: 599, businessDays: 5 },

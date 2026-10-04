@@ -515,8 +515,10 @@ This collection records every webhook event that Stripe sends, so that an event 
 | `products` | Text: `{ title: 10, brand: 5, tags: 3, description: 1 }` | `name: "product_text"` | Shopper search, admin search |
 | `products` | `{ category: 1, status: 1, minPriceCents: 1 }` | | Category listing + price |
 | `products` | `{ department: 1, status: 1, minPriceCents: 1 }` | | Department listing + price |
-| `products` | `{ category: 1, status: 1, ratingAvg: -1 }` | | Top rated, rating sort |
+| `products` | `{ category: 1, status: 1, ratingAvg: -1 }` | | Rating sort within a category |
 | `products` | `{ status: 1, salesCount: -1 }` | | Best Sellers, relevance |
+| `products` | `{ department: 1, status: 1, ratingAvg: -1 }` | | Top Rated in {dept} |
+| `products` | `{ status: 1, maxDiscountPercent: -1 }` | | Today's Deals |
 | `products` | `{ status: 1, publishedAt: -1 }` | | New Arrivals, newest |
 | `products` | `{ brand: 1 }` | | Brand filter and facet |
 | `products` | `{ status: 1, updatedAt: -1 }` | | Admin product list |
@@ -548,7 +550,7 @@ Every shopper query includes `{ status: "active" }` and excludes inactive catego
 
 | Section | Query |
 |---|---|
-| Header, "All" sidebar, category tiles | `categories.find({ isActive: true }).sort({ level: 1, sortOrder: 1 })`, cached on the client |
+| Header, "All" sidebar, category tiles | `categories.find({ isActive: true }).sort({ level: 1, sortOrder: 1 })`, cached on the client. A category without an `image` uses the first image of its best-selling active product, and a department uses its first category's image |
 | Best Sellers | `products.find({ status: "active" }).sort({ salesCount: -1 }).limit(12)` |
 | New Arrivals | `…sort({ publishedAt: -1 }).limit(12)` |
 | Top Rated in {dept} | `products.find({ department, status: "active" }).sort({ ratingAvg: -1 }).limit(12)` |
@@ -574,6 +576,14 @@ Every shopper query includes `{ status: "active" }` and excludes inactive catego
 | `newest` | `{ publishedAt: -1 }` |
 
 Pagination uses `skip`/`limit` (24 per page) and `countDocuments`. The brand facet runs `distinct("brand", filterWithoutBrand)`.
+
+**Search suggestions** (`GET /products/suggestions?q=&category=`), called by the search bar as the user types (debounced 300 ms):
+
+- Products: the shopper filter (+ department/category scope) and `$or` of a case-insensitive word-prefix regex on `title`, `brand`, `tags`, sorted `{ salesCount: -1 }`, limit 20. The `{ status: 1, salesCount: -1 }` index drives the sort, so the scan stops after 20 matches. `$text` can't be used here because it only matches whole (stemmed) words.
+- Terms: built from those 20 products: the matched word plus up to 2 following words, from brands (except `"Generic"`), tags, and titles. Lowercased, deduplicated, max 6.
+- Categories: matched by name against the cached category tree (no extra query), max 4.
+- Response: `{ terms, categories: [{ _id, name, slug, department }], products: [{ _id, slug, title, image, priceCents }] }`, `Cache-Control: public, max-age=60`.
+- Upgrade path: Atlas Search autocomplete for typo tolerance.
 
 ### 7.3 Product details
 
@@ -691,5 +701,6 @@ All admin routes require `role: "admin"`. Every write sets `updatedBy`, and crea
 | `reviews` | ~1,600 | 552 from DummyJSON + generated |
 | `users` | 2 | `demo@example.com` (user), `admin@example.com` (admin) |
 | `orders` + `payments` | 4 + 4 | Demo user, one each in `paid`, `shipped`, `delivered`, `cancelled`. Payments are seeded with fake `pi_seed_…` ids |
-| `checkouts`, `carts`, `stripeEvents` | 0 | Created at runtime |
+| `checkouts` | 4 | One `completed` checkout per seeded order, since `orders.checkout` is required |
+| `carts`, `stripeEvents` | 0 | Created at runtime |
 | Cloudinary images | 424 | Uploaded to `amazon-clone/products/<slug>/<n>` |

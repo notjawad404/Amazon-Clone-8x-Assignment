@@ -14,8 +14,8 @@ Related docs: [01-initial-plan.md](01-initial-plan.md), [02-project-structure.md
 | 1 | Database schema & initial import | All Mongoose models and indexes. A one-time import of 184 products from the DummyJSON snapshot into MongoDB, with images on Cloudinary |
 | 2 | Authentication | Sign up, sign in, sign out, session restore, protected routes |
 | 3 | Homepage | Hero, category cards, product rows from real data |
-| 4 | Navigation | Full header, sub-nav, account menu, cart badge, footer |
-| 5 | Top search & category sidebar | Search bar with department select, "All" slide-out category menu |
+| 4 | Navigation | Full header, sub-nav, account menu, cart badge, "All" category sidebar, footer |
+| 5 | Top search | Search bar with department select and search-as-you-type suggestions, basic search results |
 | 6 | Category & product listing pages | `/s` and `/c/:slug` with filter sidebar, sort, pagination |
 | 7 | Product detail page | Gallery, variants, buy box, reviews, related products |
 | 8 | Cart | Guest + server cart, merge on sign in, save for later |
@@ -214,9 +214,9 @@ A phase is only complete when all of these hold:
 
 ## Phase 4: Navigation
 
-**Goal:** the complete global navigation: header, sub-nav, and footer.
+**Goal:** the complete global navigation: header, sub-nav, category sidebar, and footer.
 
-**Backend:** none new (uses `/auth/me` and `/categories`).
+**Backend:** `/auth/me` also returns `deliveryLocation: { city, zip } | null` from the default address (only those two fields). Otherwise uses `/categories`.
 
 **Frontend**
 - `Header` (dark `nav` color), left to right:
@@ -226,23 +226,30 @@ A phase is only complete when all of these hold:
   - `AccountMenu`: "Hello, sign in" / "Hello, {name}" + "Account & Lists ▾". The hover/focus dropdown holds a Sign in button + "New customer? Start here" for guests, and Your Account / Your Orders / Sign out for signed-in users.
   - `OrdersLink`: "Returns & Orders" → `/orders`
   - `CartIcon`: count badge from `useCart().count`. Until Phase 8 this comes from the guest cart slice.
-- `SubNav` (`nav-light`): "☰ All" button (opens the sidebar in Phase 5) + department links → `/c/:slug`.
+- `SubNav` (`nav-light`): "☰ All" button (opens the sidebar) + department links → `/c/:slug`.
+- `CategorySidebar` (in a `Drawer`):
+  - opened from "☰ All" on desktop and the ☰ menu button in the header on mobile
+  - header: "Hello, {name}" or "Hello, sign in"
+  - "Shop by Department" lists the 6 departments. Clicking one slides in a panel with its categories + "See all {department}" and a back arrow. Links go to `/c/:slug`.
+  - "Help & Settings" section: Your Account, Returns & Orders, Sign in/out
+  - closes on overlay click, Esc, or route change; keeps focus inside while open; locks body scroll
 - `Footer`: "Back to top", 4 link columns, logo row.
 - `CheckoutHeader`: logo + "Checkout" + lock icon, used on `/checkout`.
 - `Layout` picks full, minimal, or checkout chrome based on the route (02-project-structure §2.3).
-- Mobile (< 768px): the header becomes two rows (logo/account/cart, then the full-width search), and the sub-nav scrolls horizontally.
+- Mobile (< 768px): the header becomes two rows (menu button/logo/account/cart, then the full-width search), "Deliver to" moves to a strip below it, "Returns & Orders" moves into the sidebar, the account dropdown becomes a plain link, and the sub-nav scrolls horizontally.
 - Keyboard: the dropdown opens on focus, Esc closes it, and there is a "Skip to main content" link.
 
 **Done when**
 - The header, sub-nav, and footer appear on every full-layout page. Sign-in/up shows the minimal layout and checkout shows the checkout header.
 - The account menu shows the correct content for guests and signed-in users, and Sign out works from it.
+- The sidebar opens, drills down into a department's categories, goes back, navigates, and closes. It works with the keyboard alone.
 - The navigation works at 375px, 768px, and 1440px widths and with the keyboard alone.
 
 ---
 
-## Phase 5: Top Search & Category Sidebar
+## Phase 5: Top Search
 
-**Goal:** working global search and the "All" slide-out category menu.
+**Goal:** working global search.
 
 **Backend**
 - `GET /api/products` with basic search:
@@ -252,7 +259,8 @@ A phase is only complete when all of these hold:
   - default sort: relevance
 - `search.service.js` takes the params and returns the query to run. Filters and the remaining sorts are added in Phase 6, still in this one service.
 - Validated by `product.schema.js` (Zod): `q` max 100 chars, `page` ≥ 1, `limit` ≤ 48.
-- Tests: text search finds "iPhone", category filtering by department vs category, invalid params → 400.
+- `GET /api/products/suggestions?q=&category=` → `{ terms, categories, products }` (03-database-schema §7.2). Word-prefix matching, scoped to the selected department.
+- Tests: text search finds "iPhone", category filtering by department vs category, invalid params → 400, suggestions match word prefixes, stay in the selected department, and treat regex characters as text.
 
 **Frontend**
 - `SearchBar`:
@@ -261,18 +269,12 @@ A phase is only complete when all of these hold:
   - submitting goes to `/s?k=<query>&category=<slug>`
   - the input and select are filled from the URL when you land on `/s`
   - the input gets an orange focus ring
-- `CategorySidebar` (in a `Drawer`):
-  - opened from "☰ All"
-  - header: "Hello, {name}" or "Hello, sign in"
-  - "Shop by Department" lists the 6 departments. Clicking one slides in a panel with its categories + "See all {department}" and a back arrow. Links go to `/c/:slug`.
-  - "Help & Settings" section: Your Account, Sign in/out
-  - closes on overlay click, Esc, or route change; keeps focus inside while open; locks body scroll
-- `SearchPage` (basic version): reads `k` and `category`, calls `searchProducts`, and shows a results count and a grid of `ProductCard`s.
+  - suggestions: after 300 ms without typing, a dropdown lists related search terms (typed part normal, completion bold), matching departments/categories, and up to 5 products with thumbnail and price. Arrow keys move through them, Enter picks one, Esc closes. Terms go to `/s`, categories to `/c/:slug`, products to `/p/:slug`
+- `SearchPage` (basic version): reads `k` and `category` (or the `/c/:slug` param), calls `searchProducts`, and shows a results count, a grid of `ProductCard`s, and Previous/Next links. Unknown slugs show the 404 page.
 
 **Done when**
 - Searching "laptop" with the department set to All shows the laptops. Searching "watch" with Fashion selected shows only watches.
 - Search with an empty query does nothing. A search with no matches shows an empty state with suggestions.
-- The sidebar opens, drills down into a department's categories, goes back, navigates, and closes. It works with the keyboard alone.
 - Reloading `/s?k=phone` keeps the input filled and the results the same.
 
 ---
@@ -692,7 +694,7 @@ A phase is only complete when all of these hold:
 
 These items are out of MVP scope. They're listed in rough priority order:
 
-1. Search autocomplete (Atlas Search)
+1. Typo-tolerant search and autocomplete (Atlas Search)
 2. Writing reviews (verified purchasers only)
 3. Wishlists
 4. "Inspired by your browsing history" row

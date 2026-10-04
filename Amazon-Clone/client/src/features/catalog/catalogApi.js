@@ -11,7 +11,18 @@ export const catalogApi = apiSlice.injectEndpoints({
       query: () => '/products/home',
       keepUnusedDataFor: CATALOG_CACHE_SECONDS,
     }),
+    searchProducts: build.query({
+      query: (params) => ({ url: '/products', params }),
+    }),
+    getSuggestions: build.query({
+      query: (params) => ({ url: '/products/suggestions', params }),
+    }),
   }),
 })
 
-export const { useGetCategoriesQuery, useGetHomeQuery } = catalogApi
+export const {
+  useGetCategoriesQuery,
+  useGetHomeQuery,
+  useSearchProductsQuery,
+  useGetSuggestionsQuery,
+} = catalogApi
