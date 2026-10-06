@@ -131,6 +131,13 @@ async function withCharge(paymentIntent) {
   return stripe.paymentIntents.retrieve(paymentIntent.id, { expand: ['latest_charge'] })
 }
 
+// Newer API versions leave the refunds list out of the Charge, so it's fetched separately.
+async function withRefunds(charge) {
+  if (charge.refunds?.data) return charge
+  const refunds = await stripe.refunds.list({ payment_intent: charge.payment_intent, limit: 100 })
+  return { ...charge, refunds: { data: refunds.data } }
+}
+
 const HANDLERS = {
   'payment_intent.succeeded': onSucceeded,
   'payment_intent.payment_failed': onFailed,
@@ -140,15 +147,12 @@ const HANDLERS = {
   'charge.refunded': onRefunded,
 }
 
-async function apply(event) {
-  let object = event.data.object
-  if (event.type === 'payment_intent.succeeded') object = await withCharge(object)
-
+async function runHandler(handler, object, eventId) {
   let followUp = null
   const session = await mongoose.startSession()
   try {
     await session.withTransaction(async () => {
-      followUp = await HANDLERS[event.type](object, event.id, session)
+      followUp = await handler(object, eventId, session)
     })
   } finally {
     await session.endSession()
@@ -158,6 +162,32 @@ async function apply(event) {
     logger.warn(`Order ${followUp.refund.orderNumber} was paid after it expired; refunding`)
     await refundOrder(followUp.refund, object.id)
   }
+}
+
+async function apply(event) {
+  let object = event.data.object
+  if (event.type === 'payment_intent.succeeded') object = await withCharge(object)
+  if (event.type === 'charge.refunded') object = await withRefunds(object)
+  await runHandler(HANDLERS[event.type], object, event.id)
+}
+
+const SYNC_HANDLERS = {
+  succeeded: onSucceeded,
+  processing: (pi, id, s) => onStatus(pi, id, s, 'processing'),
+}
+
+/**
+ * Reads the PaymentIntent from Stripe and applies a success (or processing) the same way the
+ * webhook would. Covers a webhook that is late or never arrives; running both is harmless
+ * because the handlers skip a payment that is already succeeded. Returns the Stripe status.
+ */
+export async function syncPaymentIntent(paymentIntentId) {
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+    expand: ['latest_charge'],
+  })
+  const handler = SYNC_HANDLERS[paymentIntent.status]
+  if (handler) await runHandler(handler, paymentIntent, null)
+  return paymentIntent.status
 }
 
 async function recordEvent(event) {

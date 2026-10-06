@@ -62,6 +62,13 @@ export const ORDER_TRANSITIONS = {
 export const ORDER_PAYMENT_STATUSES = ['unpaid', 'paid', 'refunded', 'partially_refunded']
 export const CANCEL_REASONS = ['user_cancelled', 'reservation_expired', 'admin_cancelled']
 export const RESERVATION_MINUTES = 30
+export const ORDERS_PAGE_SIZE = 10
+export const PAYMENT_SYNC_LIMIT = 10
+export const ORDER_RANGES = ['30d', '3m']
+export const DEFAULT_ORDER_RANGE = '3m'
+export const CANCELLABLE_ORDER_STATUSES = ['pending_payment', 'paid']
+// Seeded demo payments never existed at Stripe, so their refunds are recorded locally.
+export const SEED_PAYMENT_INTENT_PREFIX = 'pi_seed_'
 export const EXPIRY_JOB_INTERVAL_MS = 60_000
 export const EXPIRY_BATCH_SIZE = 50
 export const ORDER_NUMBER_ATTEMPTS = 3

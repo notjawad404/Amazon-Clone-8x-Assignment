@@ -40,7 +40,10 @@ export const fakeStripe = {
         return intent
       }),
     },
-    refunds: { create: vi.fn(async () => ({ id: 're_test_1', status: 'succeeded' })) },
+    refunds: {
+      create: vi.fn(async () => ({ id: 're_test_1', status: 'succeeded' })),
+      list: vi.fn(async () => ({ data: [] })),
+    },
   },
 }
 

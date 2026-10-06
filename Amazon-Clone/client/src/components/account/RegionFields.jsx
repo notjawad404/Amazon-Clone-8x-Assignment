@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useEffect, useEffectEvent, useId } from 'react'
 import {
   useGetCitiesQuery,
   useGetCountriesQuery,
@@ -23,6 +23,13 @@ export default function RegionFields({ form }) {
   )
   const countryField = form.fieldProps('country')
   const stateField = form.fieldProps('state')
+
+  // Addresses saved before full names were required can hold a code like "WA".
+  const legacyState = states.find((item) => item.code === state && item.name !== state)
+  const applyStateName = useEffectEvent((name) => form.setFieldValues({ state: name }))
+  useEffect(() => {
+    if (legacyState) applyStateName(legacyState.name)
+  }, [legacyState])
 
   return (
     <>

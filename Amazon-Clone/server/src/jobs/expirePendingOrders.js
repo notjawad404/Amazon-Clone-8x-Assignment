@@ -2,16 +2,17 @@ import mongoose from 'mongoose'
 import { Order, Payment } from '../models/index.js'
 import { releaseStock } from '../services/inventory.service.js'
 import { cancelPaymentIntent } from '../services/payment.service.js'
+import { syncPaymentIntent } from '../services/stripeWebhook.service.js'
 import { EXPIRY_BATCH_SIZE, EXPIRY_JOB_INTERVAL_MS } from '../utils/constants.js'
 import { logger } from '../utils/logger.js'
-
-const SETTLED_BY_WEBHOOK = ['succeeded', 'processing']
 
 async function expireOrder(orderId) {
   const payment = await Payment.findOne({ order: orderId }).lean()
   if (payment) {
     const status = await cancelPaymentIntent(payment.stripePaymentIntentId)
-    if (SETTLED_BY_WEBHOOK.includes(status)) return false
+    // A paid order whose webhook never came is recorded as paid, not cancelled.
+    if (status === 'succeeded') await syncPaymentIntent(payment.stripePaymentIntentId)
+    if (status === 'succeeded' || status === 'processing') return false
   }
 
   const session = await mongoose.startSession()

@@ -36,3 +36,9 @@ export const CHECKOUT_STORAGE_KEY = 'checkout'
 export const LOCATIONS_CACHE_SECONDS = 3600
 export const ORDER_POLL_INTERVAL_MS = 2000
 export const ORDER_CONFIRM_TIMEOUT_MS = 20_000
+export const MAX_ADDRESSES = 10
+export const ORDER_RANGE_OPTIONS = [
+  { value: '30d', label: 'past 30 days' },
+  { value: '3m', label: 'past 3 months' },
+]
+export const DEFAULT_ORDER_RANGE = '3m'

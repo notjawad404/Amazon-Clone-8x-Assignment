@@ -463,7 +463,7 @@ There is one document per order, matching **one Stripe PaymentIntent**. A retry 
 | `stripePaymentIntentId` | String | R, U | `pi_...` |
 | `amountCents` | Number | R | Equal to `order.totalCents` |
 | `currency` | String | R, default `"usd"` | |
-| `status` | String | enum `requires_payment_method` \| `requires_action` \| `processing` \| `succeeded` \| `canceled` | Mirrors the PaymentIntent status. It is updated **only by webhooks** (or the expiry job), never by the client |
+| `status` | String | enum `requires_payment_method` \| `requires_action` \| `processing` \| `succeeded` \| `canceled` | Mirrors the PaymentIntent status. It is updated only from Stripe: by webhooks, by the server reading the PaymentIntent (see §7.5, "Payment sync"), or by the expiry job. Never by the client |
 | `failedAttempts` | Number | default 0 | Increased on `payment_intent.payment_failed` |
 | `lastError` | `{ code, declineCode, message, at }` \| null | | From `last_payment_error`. Shown to the user on retry |
 | `card` | `{ brand, last4, expMonth, expYear, country }` \| null | | From the successful charge's `payment_method_details.card` |
@@ -663,7 +663,8 @@ Client                          API                                   MongoDB   
    1. `stripe.webhooks.constructEvent(rawBody, signature, secret)`. If it fails, return 400.
    2. Insert into `stripeEvents`. If the `eventId` already exists and was `processed`, return 200 without doing anything.
    3. Process the event, then mark it `processed`, or `failed` and return 500 so Stripe retries.
-6. **Applying `succeeded`.** Checks before marking the order paid:
+6. **Payment sync (when a webhook is late or lost).** Reading an order (`GET /orders`, `GET /orders/:orderNumber`) first asks Stripe about the user's `pending_payment` orders whose payment is not final (`paymentSync.service`, max 10). A `succeeded` PaymentIntent is applied with the same handler as the webhook, and `processing` is recorded too. The expiry job does the same before cancelling, so a paid order is never cancelled because its webhook never arrived. The handlers skip a payment that is already `succeeded`, so a webhook arriving afterwards changes nothing. Pending orders carry `paymentState`: `confirming` (Stripe is processing or has succeeded), `failed` (`lastError`), or `awaiting`.
+7. **Applying `succeeded`.** Checks before marking the order paid:
    - `amount_received === order.totalCents` and the currency matches
    - the order is still `pending_payment`
 
@@ -693,9 +694,16 @@ Client                          API                                   MongoDB   
 
 ### 7.7 Account and orders
 
-- Order history: `orders.find({ user, createdAt: { $gte } }).sort({ createdAt: -1 })`.
-- The order detail page joins `payments` for the card, receipt URL, and refunds.
-- Buy it again: adds the items' `product`/`variantId` to the cart if the product is active and the variant is active and in stock.
+- Order history: `orders.find({ user, createdAt: { $gte } }).sort({ createdAt: -1 })`, 10 per page. `range` is `30d`, `3m` (default), or a year such as `2026` (`$gte` Jan 1, `$lt` the next Jan 1). The response includes `years` (the years the user has orders in) for the range select.
+- The order detail page joins `payments` for the card, receipt URL, and refunds, and includes `statusHistory` for the timeline and `canCancel`.
+- Buy it again: adds the items' `product`/`variantId` to the cart if the product is active and the variant is active and in stock (same rules as Add to Cart). The response is `{ cart, addedCount, skipped: [{ title, reason }] }`.
+- **Cancel** (`pending_payment` or `paid` only, else `409 order_not_cancellable`):
+  - pending: cancel the PaymentIntent first; if it is already `succeeded`/`processing`, return `409 payment_in_progress` and let the webhook settle it.
+  - transaction: re-read the order with its expected status (else `409 order_changed`), move it to `cancelled` (`user_cancelled`), release stock; a paid order also has its `salesCount` taken back.
+  - after commit, a paid order is refunded (`refunds.create`, idempotency key `refund-<orderId>`). If Stripe fails, the order stays cancelled and the API returns `502 refund_failed`; cancelling again retries the refund. `paymentStatus` becomes `refunded` when `charge.refunded` arrives.
+  - `charge.refunded` on current API versions has no `refunds` list on the Charge, so the handler fetches `refunds.list({ payment_intent })` before its transaction.
+  - Seeded demo payments (`pi_seed_…`) never existed at Stripe, so their refund is recorded directly on the payment and order.
+- `npm run orders:advance` (`seed/advanceOrders.js`): shipped → delivered, then paid → shipped, so each run moves an order one step, adding `statusHistory` entries and `shippedAt`/`deliveredAt`.
 
 ### 7.8 Admin catalog management
 

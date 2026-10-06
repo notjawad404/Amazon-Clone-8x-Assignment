@@ -154,9 +154,9 @@ client/
     │   │   ├── ReviewItemsStep.jsx
     │   │   └── OrderSummary.jsx   # Sticky sidebar with totals + Place order
     │   ├── account/
-    │   │   ├── AddressForm.jsx
-    │   │   ├── RegionFields.jsx   # Country → state/province → city (suggestions)
-    │   │   └── AddressCard.jsx
+    │   │   ├── AddressForm.jsx    # Add or edit (address prop)
+    │   │   ├── AddressCard.jsx    # Edit / Remove (confirm) / Set as Default
+    │   │   └── RegionFields.jsx   # Country → state/province → city (suggestions)
     │   ├── orders/
     │   │   ├── OrderPlaced.jsx    # Confirmation: thanks, arrival, address, payment, items, totals
     │   │   ├── PaymentPending.jsx # Confirming… / still confirming / payment failed
@@ -164,8 +164,10 @@ client/
     │   │   ├── OrderCancelled.jsx
     │   │   ├── OrderItems.jsx
     │   │   ├── OrderTotals.jsx
-    │   │   ├── OrderCard.jsx
-    │   │   ├── OrderTimeline.jsx
+    │   │   ├── OrderCard.jsx      # Header strip (placed, total, ship-to popover, #), items, actions
+    │   │   ├── OrderTimeline.jsx  # statusHistory + upcoming steps
+    │   │   ├── BuyAgainButton.jsx # Adds to cart, opens the cart with a note about skipped items
+    │   │   ├── CancelOrderButton.jsx # Confirmation dialog; refund wording for paid orders
     │   │   └── StatusBadge.jsx
     │   ├── admin/
     │   │   ├── AdminLayout.jsx    # Side nav (Products, Categories) + content area
@@ -360,6 +362,8 @@ server/
     │   ├── pricing.service.js     # subtotal, shipping, tax, total, delivery dates
     │   ├── checkout.service.js    # start, get, update, place (idempotent per checkout)
     │   ├── checkoutPricing.service.js # price items from current data, issues, quote, delivery options
+    │   ├── orderHistory.service.js # list (range, page, years), details for the owner
+    │   ├── orderActions.service.js # cancel (+ refund), buy again
     │   ├── order.service.js       # createOrder (txn: claim checkout, reserve stock, insert order)
     │   ├── inventory.service.js   # reserveStock / releaseStock / recordSales (session-aware)
     │   ├── payment.service.js     # ensurePaymentIntent (one per order), cancel, refund

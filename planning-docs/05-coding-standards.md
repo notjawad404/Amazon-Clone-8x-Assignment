@@ -299,7 +299,7 @@ Go through this list at the end of every phase that touches the area, and fully 
 These rules apply to the design in [03-database-schema.md §7.5](03-database-schema.md#75-checkout-and-stripe-payment).
 
 - **The amount is always calculated on the server.** The PaymentIntent `amount` is the order's `totalCents` and nothing else.
-- **Only webhooks mark an order paid.** The client's `confirmCardPayment` result is used for the UI only, never to change data.
+- **Only Stripe's own data marks an order paid**: a verified webhook, or the server reading the PaymentIntent from Stripe with the secret key. The client's `confirmCardPayment` result is used for the UI only, never to change data.
 - **Verify every webhook** with `stripe.webhooks.constructEvent` on the **raw** body. Reject anything that doesn't verify.
 - **Every webhook handler must be safe to run twice.** Record each event in `stripeEvents` with a unique id, and only apply state transitions from the expected status.
 - **Use idempotency keys** on every Stripe write call (`pi-<orderId>`, `refund-<orderId>`).

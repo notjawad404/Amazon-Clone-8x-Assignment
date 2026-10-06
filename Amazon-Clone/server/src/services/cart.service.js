@@ -126,9 +126,18 @@ export async function removeItem(userId, itemId) {
   return hydrateCart(cart.items)
 }
 
-// Guest items that are unavailable, out of stock, or past the item limit are skipped.
-export async function mergeGuestItems(userId, guestItems) {
-  const productIds = [...new Set(guestItems.map((item) => item.productId))]
+function skipReason(match, productId) {
+  if (!match || String(match.productId) !== String(productId)) return 'unavailable'
+  if (match.variant.stock === 0) return 'out_of_stock'
+  return null
+}
+
+/**
+ * Adds several items with the usual rules (qty capped at stock and MAX_CART_QTY). Items that are
+ * unavailable, out of stock, or past the item limit are skipped and reported by variantId.
+ */
+export async function addItemsToCart(userId, items) {
+  const productIds = [...new Set(items.map((item) => String(item.productId)))]
   const products = await Product.find({
     _id: mongoose.trusted({ $in: productIds }),
     status: 'active',
@@ -138,19 +147,30 @@ export async function mergeGuestItems(userId, guestItems) {
   const variantsById = new Map(
     products.flatMap((product) =>
       product.variants
-        .filter((variant) => variant.isActive && variant.stock > 0)
+        .filter((variant) => variant.isActive)
         .map((variant) => [String(variant._id), { productId: product._id, variant }]),
     ),
   )
 
+  let skipped = []
   const cart = await updateCart(userId, (draft) => {
-    for (const { productId, variantId, qty, savedForLater } of guestItems) {
-      const match = variantsById.get(variantId)
-      if (!match || String(match.productId) !== productId) continue
-      addToCart(draft, { productId, variant: match.variant, qty, savedForLater })
+    skipped = []
+    for (const { productId, variantId, qty, savedForLater = false } of items) {
+      const match = variantsById.get(String(variantId))
+      const reason =
+        skipReason(match, productId) ??
+        (addToCart(draft, { productId, variant: match.variant, qty, savedForLater })
+          ? null
+          : 'cart_full')
+      if (reason) skipped.push({ variantId: String(variantId), reason })
     }
   })
-  return hydrateCart(cart.items)
+  return { cart: await hydrateCart(cart.items), skipped }
+}
+
+export async function mergeGuestItems(userId, guestItems) {
+  const { cart } = await addItemsToCart(userId, guestItems)
+  return cart
 }
 
 export function previewGuestItems(guestItems) {

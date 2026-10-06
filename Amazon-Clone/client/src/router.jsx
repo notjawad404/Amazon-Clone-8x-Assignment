@@ -12,13 +12,6 @@ import AdminRoute from './routes/AdminRoute'
 import GuestOnlyRoute from './routes/GuestOnlyRoute'
 import ProtectedRoute from './routes/ProtectedRoute'
 
-const PROTECTED_PAGES = [
-  { path: '/account', title: 'Your Account' },
-  { path: '/account/addresses', title: 'Your Addresses' },
-  { path: '/orders', title: 'Your Orders' },
-  { path: '/orders/:orderNumber', title: 'Order details' },
-]
-
 const ADMIN_PAGES = [
   { path: '/admin/products', title: 'Admin: Products' },
   { path: '/admin/products/new', title: 'Admin: New product' },
@@ -32,6 +25,8 @@ const toPlaceholderRoute = ({ path, title, layout }) => ({
   handle: { layout },
 })
 
+const lazyPage = (load) => async () => ({ Component: (await load()).default })
+
 export const router = createBrowserRouter([
   {
     element: <App />,
@@ -42,10 +37,7 @@ export const router = createBrowserRouter([
           { path: '/', element: <HomePage /> },
           { path: '/s', element: <SearchPage /> },
           { path: '/c/:slug', element: <SearchPage /> },
-          {
-            path: '/p/:slug',
-            lazy: async () => ({ Component: (await import('./pages/ProductPage')).default }),
-          },
+          { path: '/p/:slug', lazy: lazyPage(() => import('./pages/ProductPage')) },
           { path: '/cart', element: <CartPage /> },
           {
             element: <ProtectedRoute />,
@@ -53,15 +45,22 @@ export const router = createBrowserRouter([
               {
                 path: '/checkout',
                 handle: { layout: 'checkout' },
-                lazy: async () => ({ Component: (await import('./pages/CheckoutPage')).default }),
+                lazy: lazyPage(() => import('./pages/CheckoutPage')),
               },
               {
                 path: '/order/:orderNumber/confirmation',
-                lazy: async () => ({
-                  Component: (await import('./pages/OrderConfirmationPage')).default,
-                }),
+                lazy: lazyPage(() => import('./pages/OrderConfirmationPage')),
               },
-              ...PROTECTED_PAGES.map(toPlaceholderRoute),
+              { path: '/account', lazy: lazyPage(() => import('./pages/AccountPage')) },
+              {
+                path: '/account/addresses',
+                lazy: lazyPage(() => import('./pages/AddressesPage')),
+              },
+              { path: '/orders', lazy: lazyPage(() => import('./pages/OrdersPage')) },
+              {
+                path: '/orders/:orderNumber',
+                lazy: lazyPage(() => import('./pages/OrderDetailPage')),
+              },
             ],
           },
           { element: <AdminRoute />, children: ADMIN_PAGES.map(toPlaceholderRoute) },

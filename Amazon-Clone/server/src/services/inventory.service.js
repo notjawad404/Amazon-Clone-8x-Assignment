@@ -47,3 +47,14 @@ export async function recordSales(items, session) {
     await Product.updateOne({ _id: item.product }, { $inc: { salesCount: item.qty } }, { session })
   }
 }
+
+// Undoes recordSales for a cancelled paid order, never taking a count below zero.
+export async function reverseSales(items, session) {
+  for (const item of items) {
+    await Product.updateOne(
+      { _id: item.product, salesCount: mongoose.trusted({ $gte: item.qty }) },
+      { $inc: { salesCount: -item.qty } },
+      { session },
+    )
+  }
+}
